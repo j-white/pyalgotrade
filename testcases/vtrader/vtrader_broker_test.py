@@ -18,17 +18,62 @@
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 
+import datetime
+
 from pyalgotrade import bar
 from pyalgotrade import broker
 from pyalgotrade import barfeed
 
 from mock_vtrader_server import MockVtraderServerTestCase
 
+class BarsBuilder(object):
+    def __init__(self, instrument, frequency):
+        self.__instrument = instrument
+        self.__frequency = frequency
+        self.__nextDateTime = datetime.datetime(2011, 1, 1)
+        if frequency == bar.Frequency.TRADE:
+            self.__delta = datetime.timedelta(milliseconds=1)
+        elif frequency == bar.Frequency.SECOND:
+            self.__delta = datetime.timedelta(seconds=1)
+        elif frequency == bar.Frequency.MINUTE:
+            self.__delta = datetime.timedelta(minutes=1)
+        elif frequency == bar.Frequency.HOUR:
+            self.__delta = datetime.timedelta(hours=1)
+        elif frequency == bar.Frequency.DAY:
+            self.__delta = datetime.timedelta(days=1)
+        else:
+            raise Exception("Invalid frequency")
+
+    def advance(self, sessionClose):
+        if sessionClose:
+            self.__nextDateTime = datetime.datetime(self.__nextDateTime.year, self.__nextDateTime.month, self.__nextDateTime.day)
+            self.__nextDateTime += datetime.timedelta(days=1)
+        else:
+            self.__nextDateTime += self.__delta
+
+    def nextBars(self, openPrice, highPrice, lowPrice, closePrice, volume=None, sessionClose=False):
+        if volume is None:
+            volume = closePrice*10
+        bar_ = bar.BasicBar(self.__nextDateTime, openPrice, highPrice, lowPrice, closePrice, volume, closePrice, self.__frequency)
+        bar_.setSessionClose(sessionClose)
+        ret = {self.__instrument : bar_}
+        self.advance(sessionClose)
+        return bar.Bars(ret)
+
+    def nextTuple(self, openPrice, highPrice, lowPrice, closePrice, volume=None, sessionClose=False):
+        ret = self.nextBars(openPrice, highPrice, lowPrice, closePrice, volume, sessionClose)
+        return (ret.getDateTime(), ret)
+
 class MarketOrderTestCase(MockVtraderServerTestCase):
     def testBuyAndSell(self):
+        vtrader, backtest = self.get_brokers(1000, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
+        barsBuilder = BarsBuilder(MockVtraderServerTestCase.TestInstrument, bar.Frequency.MINUTE)
 
         # Buy
-        brk = self.get_vtrader_broker(1000, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
-        self.assertEqual(brk.getCash(), 1000)
-        # order = brk.createMarketOrder(broker.Order.Action.BUY, MockVtraderServerTestCase.TestInstrument, 1)
-        # brk.placeOrder(order)
+        self.assertEqual(vtrader.getCash(), 1000)
+        order = vtrader.createMarketOrder(broker.Order.Action.BUY, MockVtraderServerTestCase.TestInstrument, 1)
+        vtrader.placeOrder(order)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        backtest.onBars(*barsBuilder.nextTuple(10, 15, 8, 12))
+        self.assertTrue(order.isFilled())

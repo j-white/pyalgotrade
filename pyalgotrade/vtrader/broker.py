@@ -21,6 +21,21 @@
 from pyalgotrade import broker
 from client import VtraderClient
 
+class VtraderOrder:
+    pass
+
+class MarketOrder(broker.MarketOrder, VtraderOrder):
+    pass
+
+class LimitOrder(broker.LimitOrder, VtraderOrder):
+    pass
+
+class StopOrder(broker.StopOrder, VtraderOrder):
+    pass
+
+class StopLimitOrder(broker.StopLimitOrder, VtraderOrder):
+    pass
+
 class VtraderBroker(broker.Broker):
     """A Vtrader broker.
     """
@@ -45,94 +60,27 @@ class VtraderBroker(broker.Broker):
         raise NotImplementedError()
 
     def placeOrder(self, order):
-        """Submits an order.
+        if order.isInitial():
+            self.client.place_order(order)
 
-        :param order: The order to submit.
-        :type order: :class:`Order`.
-
-        .. note::
-            * After this call the order is in SUBMITTED state and an event is not triggered for this transition.
-            * Calling this twice on the same order will raise an exception.
-        """
-        raise NotImplementedError()
+            # Switch from INITIAL -> SUBMITTED
+            # IMPORTANT: Do not emit an event for this switch because when using the position interface
+            # the order is not yet mapped to the position and Position.onOrderUpdated will get called.
+            order.switchState(broker.Order.State.SUBMITTED)
+        else:
+            raise Exception("The order was already processed")
 
     def createMarketOrder(self, action, instrument, quantity, onClose=False):
-        """Creates a Market order.
-        A market order is an order to buy or sell a stock at the best available price.
-        Generally, this type of order will be executed immediately. However, the price at which a market order will be executed
-        is not guaranteed.
-
-        :param action: The order action.
-        :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
-        :param instrument: Instrument identifier.
-        :type instrument: string.
-        :param quantity: Order quantity.
-        :type quantity: int/float.
-        :param onClose: True if the order should be filled as close to the closing price as possible (Market-On-Close order). Default is False.
-        :type onClose: boolean.
-        :rtype: A :class:`MarketOrder` subclass.
-        """
-        raise NotImplementedError()
+        return MarketOrder(-1, action, instrument, quantity, onClose)
 
     def createLimitOrder(self, action, instrument, limitPrice, quantity):
-        """Creates a Limit order.
-        A limit order is an order to buy or sell a stock at a specific price or better.
-        A buy limit order can only be executed at the limit price or lower, and a sell limit order can only be executed at the
-        limit price or higher.
-
-        :param action: The order action.
-        :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
-        :param instrument: Instrument identifier.
-        :type instrument: string.
-        :param limitPrice: The order price.
-        :type limitPrice: float
-        :param quantity: Order quantity.
-        :type quantity: int/float.
-        :rtype: A :class:`LimitOrder` subclass.
-        """
-        raise NotImplementedError()
+        return LimitOrder(-1, action, instrument, limitPrice, quantity)
 
     def createStopOrder(self, action, instrument, stopPrice, quantity):
-        """Creates a Stop order.
-        A stop order, also referred to as a stop-loss order, is an order to buy or sell a stock once the price of the stock
-        reaches a specified price, known as the stop price.
-        When the stop price is reached, a stop order becomes a market order.
-        A buy stop order is entered at a stop price above the current market price. Investors generally use a buy stop order
-        to limit a loss or to protect a profit on a stock that they have sold short.
-        A sell stop order is entered at a stop price below the current market price. Investors generally use a sell stop order
-        to limit a loss or to protect a profit on a stock that they own.
-
-        :param action: The order action.
-        :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
-        :param instrument: Instrument identifier.
-        :type instrument: string.
-        :param stopPrice: The trigger price.
-        :type stopPrice: float
-        :param quantity: Order quantity.
-        :type quantity: int/float.
-        :rtype: A :class:`StopOrder` subclass.
-        """
-        raise NotImplementedError()
+        return StopOrder(-1, action, instrument, stopPrice, quantity)
 
     def createStopLimitOrder(self, action, instrument, stopPrice, limitPrice, quantity):
-        """Creates a Stop-Limit order.
-        A stop-limit order is an order to buy or sell a stock that combines the features of a stop order and a limit order.
-        Once the stop price is reached, a stop-limit order becomes a limit order that will be executed at a specified price
-        (or better). The benefit of a stop-limit order is that the investor can control the price at which the order can be executed.
-
-        :param action: The order action.
-        :type action: Order.Action.BUY, or Order.Action.BUY_TO_COVER, or Order.Action.SELL or Order.Action.SELL_SHORT.
-        :param instrument: Instrument identifier.
-        :type instrument: string.
-        :param stopPrice: The trigger price.
-        :type stopPrice: float
-        :param limitPrice: The price for the limit order.
-        :type limitPrice: float
-        :param quantity: Order quantity.
-        :type quantity: int/float.
-        :rtype: A :class:`StopLimitOrder` subclass.
-        """
-        raise NotImplementedError()
+        return StopLimitOrder(-1, action, instrument, limitPrice, stopPrice, quantity)
 
     def cancelOrder(self, order):
         """Requests an order to be canceled. If the order is filled an Exception is raised.

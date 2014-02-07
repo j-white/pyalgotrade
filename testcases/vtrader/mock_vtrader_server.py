@@ -148,6 +148,18 @@ class DashboardAccountBalance(JSONResource):
         response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker)
         return str(response)
 
+class OrderCreate(resource.Resource):
+    isLeaf = True
+
+    def __init__(self, site):
+        resource.Resource.__init__(self)
+        self.site = site
+
+    def render_POST(self, request):
+        print request.args
+
+        return "Your order has been submitted"
+
 class VtraderBrokerSite(server.Site):
     def __init__(self, portfolio, broker):
         self.portfolio_name = portfolio
@@ -181,6 +193,14 @@ class VtraderBrokerSite(server.Site):
         get_dashboard_account_balance = DashboardAccountBalance(self)
         account_balance.putChild('GetDashboardAccountBalance', get_dashboard_account_balance)
 
+        # /VirtualTrader/Order
+        order = PathResource()
+        virtualtrader.putChild('Order', order)
+
+        # /VirtualTrader/Order/Create
+        order_create = OrderCreate(self)
+        order.putChild('Create', order_create)
+
         return root
 
 class MockVtraderServerTestCase(unittest.TestCase):
@@ -194,12 +214,16 @@ class MockVtraderServerTestCase(unittest.TestCase):
         if self.__reactor_started:
             reactor.callFromThread(reactor.stop)
 
-    def get_vtrader_broker(self, cash, barFeed):
+    def get_brokers(self, cash, barFeed):
+        """ Returns both a VirtualTraderBroker and a BacktestingBroker.
+            The VirtualTraderBroker interfaces with a mock webservice that is backed
+            by the BacktestingBroker.
+        """
         # Create a backtesting broker used to back the mock server
-        brk = backtesting.Broker(cash, barFeed)
+        backtest = backtesting.Broker(cash, barFeed)
 
         # Create a new site instance
-        site = VtraderBrokerSite(self.PortfolioName, brk)
+        site = VtraderBrokerSite(self.PortfolioName, backtest)
 
         # Add the new site
         port = reactor.listenTCP(0, site)
@@ -209,4 +233,4 @@ class MockVtraderServerTestCase(unittest.TestCase):
         self.__reactor_started = True
 
         # Create a new broker pointing to the new site instance
-        return VtraderBroker("test", "testuser", "testpass", "http://127.0.0.1:%d" % port.getHost().port)
+        return VtraderBroker("test", "testuser", "testpass", "http://127.0.0.1:%d" % port.getHost().port), backtest

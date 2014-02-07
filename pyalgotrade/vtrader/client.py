@@ -28,6 +28,8 @@ import re
 import os
 from datetime import datetime
 
+from pyalgotrade import broker
+
 class OrderFailed(Exception):
     pass
 
@@ -87,6 +89,88 @@ class VtraderClient():
 
         raise PortfolioNotFound()
 
+    def get_cash_value(self):
+        account_balance = self._get_account_balance()
+        return float(account_balance['MoneyMarketCashValue']['RawData'])
+
+    def place_order(self, order):
+        url = "%s/VirtualTrader/Order/Create" % self.base_url
+        data = {
+            'Duration': 'Day',
+            'Limit': '',
+            'PortfolioId': self.portfolio_id,
+            'OrderType': 'Market',
+            'Status': '',
+            'Stop': '',
+            'KeySymbol': self.__get_key(order.getInstrument()),
+            'IsFutureTrade': False,
+            'IsIndexOrCurrencyOptionTrade': False,
+            'X-Requested-With': 'XMLHttpRequest',
+        }
+
+        # We should repeat this for every leg in the spread, but we're only dealing with simple orders
+        leg_index = 0
+        action = self.__get_action(order)
+        instrument_type = self.__get_instrument_type(order.getInstrument())
+        if instrument_type == self.InstrumentType.STOCK:
+            data.update(self.__get_stock_leg(leg_index, action, order))
+        else:
+            raise Exception("Option orders are not yet supported.")
+            #data.update(self.__get_option_leg(leg_index, order))
+
+        data = urllib.urlencode(data)
+        response = self.__get_response_data(url, data, use_cache=False)
+        if not 'Your order has been submitted' in response:
+            raise OrderFailed("Received invalid response: %s" % response)
+
+    def __get_action(self, order):
+        """ Maps the order action to the proper Vtrader action code. """
+        action = None
+        instrument_type = self.__get_instrument_type(order.getInstrument())
+        if instrument_type == self.InstrumentType.STOCK:
+            if order.getAction() == broker.Order.Action.BUY:
+                action = self.Action.BUY_STOCK
+            elif order.getAction() == broker.Order.Action.SELL:
+                action = self.Action.SELL_STOCK
+            elif order.getAction() == broker.Order.Action.SELL_SHORT:
+                action = self.Action.SELL_STOCK_SHORT
+        elif instrument_type == self.InstrumentType.CALL_OPTION or instrument_type == self.InstrumentType.PUT_OPTION:
+            if order.getAction() == broker.Order.Action.BUY:
+                action = self.Action.BUY_OPTION
+            if order.getAction() == broker.Order.Action.BUY_TO_COVER:
+                action = self.Action.BUY_OPTION_TO_CLOSE
+            elif order.getAction() == broker.Order.Action.SELL:
+                action = self.Action.SELL_OPTION_TO_CLOSE
+            elif order.getAction() == broker.Order.Action.SELL_SHORT:
+                action = self.Action.SELL_OPTION
+
+        if action is None:
+            raise Exception("Invalid instrument and action combination.")
+
+        return action
+
+    def __get_stock_leg(self, id, action, order):
+        leg_options = {
+            'Action': action,
+            'Quantity': order.getQuantity(),
+            'DisplaySymbol': order.getInstrument(),
+            'KeySymbol': self.__get_key(order.getInstrument()),
+            'Exchange': 'TSX',
+            'UnderlyingSymbol': order.getInstrument(),
+            'UnderlyingKeySymbol': self.__get_key(order.getInstrument()),
+            'UnderlyingExchange': 'TSX',
+            'AssetType': 'Stock',
+            'CFICode': 'ESXXXX',
+            'Expiration': '',
+            'Strike': '',
+            'CallPutIndicator': '',
+        }
+
+        leg = {}
+        for option in leg_options.keys():
+            leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
+        return leg
+
     def get_account_value(self):
         return self.get_cash_value() + self.get_position_value()
 
@@ -131,9 +215,6 @@ class VtraderClient():
         account_balance = self._get_account_balance()
         return float(account_balance['CurrentPositionValue']['RawData'])
 
-    def get_cash_value(self):
-        account_balance = self._get_account_balance()
-        return float(account_balance['MoneyMarketCashValue']['RawData'])
 
     def get_outstanding_orders_value(self):
         account_balance = self._get_account_balance()
@@ -370,20 +451,38 @@ class VtraderClient():
     #         leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
     #     return leg
 
-    # def __get_key(self, instrument):
-    #     if isinstance(instrument, Stock):
-    #         return 'ca;%s' % instrument.symbol
-    #     else:
-    #         class_symbol = instrument.stock.class_symbol
-    #         if not class_symbol:
-    #             class_symbol = instrument.stock.symbol
-    #         yy = instrument.expiry.strftime('%y')
-    #         offset = 64 if instrument.type == StockOption.CALL else 76
-    #         mm = chr(offset + instrument.expiry.month)
-    #         dd = instrument.expiry.strftime('%d')
-    #         strike = instrument.strike
-    #
-    #         return 'ca;O:%s\\%s%s%s\\%.1f' % (class_symbol, yy, mm, dd, strike)
+
+    class InstrumentType(object):
+        STOCK = 1
+        CALL_OPTION = 2
+        PUT_OPTION = 3
+
+    def __get_instrument_type(self, instrument):
+        """Returns the type of instrument. Valid instrument types are:
+
+         * InstrumentType.STOCK
+         * InstrumentType.CALL_OPTION
+         * InstrumentType.PUT_OPTION
+        """
+        return VtraderClient.InstrumentType.STOCK
+
+    def __get_key(self, instrument):
+        type = self.__get_instrument_type(instrument)
+
+        if type == VtraderClient.InstrumentType.STOCK:
+            return 'ca;%s' % instrument
+        else:
+            # We're dealing with an option
+            class_symbol = "TODO"
+            expiry_date = datetime.today()
+            strike_price = 11
+
+            yy = expiry_date.strftime('%y')
+            offset = 64 if type == VtraderClient.InstrumentType.CALL_OPTION else 76
+            mm = chr(offset + expiry_date.month)
+            dd = expiry_date.strftime('%d')
+
+            return 'ca;O:%s\\%s%s%s\\%.1f' % (class_symbol, yy, mm, dd, strike_price)
 
     def __get_opener(self, set_referer=True, is_ajax=False):
         opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cj))
