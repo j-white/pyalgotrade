@@ -1,3 +1,5 @@
 numpy>=1.8.0
-scipy>=0.13.3
-pytz>=2013.9
+scipy>=0.12.1
+pytz>=2012d
+twisted>=13.2.0
+jinja2>=2.7.2

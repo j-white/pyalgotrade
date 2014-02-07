@@ -19,12 +19,18 @@
 """
 
 from pyalgotrade import broker
+from client import VtraderClient
 
 class VtraderBroker(broker.Broker):
     """A Vtrader broker.
     """
-    def __init__(self, portfolio, url):
-        pass
+    def __init__(self, portfolio, username, password, url):
+        broker.Broker.__init__(self)
+        self.client = VtraderClient(portfolio, username, password, url)
+
+    def getCash(self):
+        """Returns the amount of available buying power in dollars."""
+        return self.client.get_cash_value()
 
     def getShares(self, instrument):
         """Returns the number of shares for an instrument."""
