@@ -22,6 +22,7 @@ import unittest
 """
 
 from pyalgotrade.vtrader import VtraderBroker
+from pyalgotrade import broker
 from pyalgotrade.broker import backtesting
 
 from twisted.web import server, resource
@@ -95,7 +96,7 @@ class PortfolioStrategyPositions(JSONResource):
     def render_GET(self, request):
         JSONResource.render_GET(self, request)
         portfolios = {self.site.portfolio_name : self.site.portfolio_id}
-        response = Environment().from_string(self.JSON).render(portfolios=portfolios)
+        response = self.j2env.from_string(self.JSON).render(portfolios=portfolios)
         return str(response)
 
 class DashboardAccountBalance(JSONResource):
@@ -148,6 +149,57 @@ class DashboardAccountBalance(JSONResource):
         response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker)
         return str(response)
 
+class PortfolioOrdersAndTransactions(JSONResource):
+    JSON = """ {
+                "data": [
+                    {
+                        "Id": "9ca2b5a7-08ab-4e3f-9669-fb992949c960",
+                        "PortfolioId": "{{ portfolio_id }}",
+                        "TransactionTime": "/Date(1391832375808)/",
+                        "IsOpenOrder": true,
+                        "IsPartialOrder": false,
+                        "IsAbortedOrder": false,
+                        "AbortedMessage": null,
+                        "IsStrategy": false,
+                        "KeySymbol": "ca;BB",
+                        "Symbol": "BB",
+                        "Exchange": "TSX",
+                        "UnderlyingSymbol": "",
+                        "UnderlyingExchange": "",
+                        "Description": "BLACKBERRY LIMITED",
+                        "Last": "10.86",
+                        "Bid": "10.85",
+                        "Ask": "10.87",
+                        "OrderStatus": "Pending New",
+                        "OrderType": "Market",
+                        "Side": "Buy",
+                        "PositionEffect": "",
+                        "TotalQuantity": "1",
+                        "CumulativeQuantity": "0",
+                        "CumulativeQuantityAveragePrice": "0.00",
+                        "RemainingQuantity": "1",
+                        "PriceLimit": null,
+                        "StopPrice": null,
+                        "TimeInForce": "Day"
+                    },
+                ],
+                "total": 1
+            }"""
+
+    def __init__(self, site):
+        JSONResource.__init__(self)
+        self.site = site
+
+    def render_POST(self, request):
+        portfolio_id = request.args['portfolioId'][0]
+        if portfolio_id.lower() != self.site.portfolio_id.lower():
+            raise Exception("Invalid portfolio id " + portfolio_id)
+        number_of_orders = int(request.args['nbOrdersShow'][0])
+
+        JSONResource.render_GET(self, request)
+        response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker)
+        return str(response)
+
 class OrderCreate(resource.Resource):
     isLeaf = True
 
@@ -156,7 +208,14 @@ class OrderCreate(resource.Resource):
         self.site = site
 
     def render_POST(self, request):
-        print request.args
+        instrument = request.args['OrderLegs[0].DisplaySymbol'][0]
+        action = int(request.args['OrderLegs[0].Action'][0])
+        quantity = int(request.args['OrderLegs[0].Quantity'][0])
+        type = request.args['OrderType'][0]
+
+        if type == 'Market':
+            order = self.site.broker.createMarketOrder(broker.Order.Action.BUY, instrument, quantity)
+            self.site.broker.placeOrder(order)
 
         return "Your order has been submitted"
 
@@ -165,6 +224,9 @@ class VtraderBrokerSite(server.Site):
         self.portfolio_name = portfolio
         self.portfolio_id = str(uuid.uuid1())
         self.broker = broker
+
+        # Register callbacks
+        self.broker.getOrderUpdatedEvent().subscribe(self.onOrderUpdated)
 
         self.root = self.get_root()
         server.Site.__init__(self, self.root)
@@ -201,7 +263,14 @@ class VtraderBrokerSite(server.Site):
         order_create = OrderCreate(self)
         order.putChild('Create', order_create)
 
+        # /VirtualTrader/Order/PortfolioOrdersAndTransactions_AjaxGrid
+        portfolio_orders_and_transactions = PortfolioOrdersAndTransactions(self)
+        order.putChild('PortfolioOrdersAndTransactions_AjaxGrid', portfolio_orders_and_transactions)
+
         return root
+
+    def onOrderUpdated(self, broker_, order):
+        print order
 
 class MockVtraderServerTestCase(unittest.TestCase):
     TestInstrument = "bb"

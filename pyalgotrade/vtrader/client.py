@@ -171,6 +171,9 @@ class VtraderClient():
             leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
         return leg
 
+    def get_last_orderid_for_instrument(self, instrument):
+        pass
+
     def get_account_value(self):
         return self.get_cash_value() + self.get_position_value()
 
@@ -214,7 +217,6 @@ class VtraderClient():
     def get_estimated_position_value(self):
         account_balance = self._get_account_balance()
         return float(account_balance['CurrentPositionValue']['RawData'])
-
 
     def get_outstanding_orders_value(self):
         account_balance = self._get_account_balance()

@@ -18,11 +18,13 @@
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 
+import datetime
 from pyalgotrade import broker
 from client import VtraderClient
 
 class VtraderOrder:
-    pass
+    def setId(self, orderId):
+        self.__id = orderId
 
 class MarketOrder(broker.MarketOrder, VtraderOrder):
     pass
@@ -41,6 +43,7 @@ class VtraderBroker(broker.Broker):
     """
     def __init__(self, portfolio, username, password, url):
         broker.Broker.__init__(self)
+        self.__activeOrders = {}
         self.client = VtraderClient(portfolio, username, password, url)
 
     def getCash(self):
@@ -62,6 +65,16 @@ class VtraderBroker(broker.Broker):
     def placeOrder(self, order):
         if order.isInitial():
             self.client.place_order(order)
+
+            # The Vtrader API does not return the order ID when the order is placed, it only
+            # returns a message confirming that the order was submitted. In order to
+            # retrieve the order id we need to make an additional call. We will assume that the
+            # id of the last order for the given instrument is the one we just opened
+            # IMPORTANT: This has some limitations in a multi-threaded or multi-client environment, but
+            # its the best we can do given the constraints of the API
+            order_id = self.client.get_last_orderid_for_instrument(order.getInstrument())
+            order.setId(order_id)
+            self.__activeOrders[order.getId()] = order
 
             # Switch from INITIAL -> SUBMITTED
             # IMPORTANT: Do not emit an event for this switch because when using the position interface
