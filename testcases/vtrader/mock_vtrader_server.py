@@ -194,7 +194,7 @@ class PortfolioOrdersAndTransactions(JSONResource):
         portfolio_id = request.args['portfolioId'][0]
         if portfolio_id.lower() != self.site.portfolio_id.lower():
             raise Exception("Invalid portfolio id " + portfolio_id)
-        number_of_orders = int(request.args['nbOrdersShow'][0])
+        number_of_orders_to_show = int(request.args['nbOrdersShow'][0])
 
         JSONResource.render_GET(self, request)
         response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker)
@@ -270,7 +270,7 @@ class VtraderBrokerSite(server.Site):
         return root
 
     def onOrderUpdated(self, broker_, order):
-        print order
+        pass
 
 class MockVtraderServerTestCase(unittest.TestCase):
     TestInstrument = "bb"
@@ -289,7 +289,8 @@ class MockVtraderServerTestCase(unittest.TestCase):
             by the BacktestingBroker.
         """
         # Create a backtesting broker used to back the mock server
-        backtest = backtesting.Broker(cash, barFeed)
+        commission = backtesting.FixedPerTrade(VtraderBroker.COMMISSION_PER_ORDER)
+        backtest = backtesting.Broker(cash, barFeed, commission=commission)
 
         # Create a new site instance
         site = VtraderBrokerSite(self.PortfolioName, backtest)

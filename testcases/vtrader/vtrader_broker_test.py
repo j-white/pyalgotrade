@@ -23,6 +23,7 @@ import datetime
 from pyalgotrade import bar
 from pyalgotrade import broker
 from pyalgotrade import barfeed
+from pyalgotrade.vtrader.broker import VtraderBroker
 
 from mock_vtrader_server import MockVtraderServerTestCase
 
@@ -64,16 +65,34 @@ class BarsBuilder(object):
         ret = self.nextBars(openPrice, highPrice, lowPrice, closePrice, volume, sessionClose)
         return (ret.getDateTime(), ret)
 
+class Callback:
+    def __init__(self):
+        self.eventCount = 0
+
+    def onOrderUpdated(self, broker_, order):
+        self.eventCount += 1
+
 class MarketOrderTestCase(MockVtraderServerTestCase):
     def testBuyAndSell(self):
-        vtrader, backtest = self.get_brokers(1000, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
+        vtrader, backtest = self.get_brokers(100, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
         barsBuilder = BarsBuilder(MockVtraderServerTestCase.TestInstrument, bar.Frequency.MINUTE)
 
         # Buy
-        self.assertEqual(vtrader.getCash(), 1000)
+        cb = Callback()
+        vtrader.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
+        self.assertEqual(vtrader.getCash(), 100)
         order = vtrader.createMarketOrder(broker.Order.Action.BUY, MockVtraderServerTestCase.TestInstrument, 1)
         vtrader.placeOrder(order)
         self.assertEqual(order.getFilled(), 0)
         self.assertEqual(order.getRemaining(), 1)
         backtest.onBars(*barsBuilder.nextTuple(10, 15, 8, 12))
+        vtrader.updateActiveOrders()
         self.assertTrue(order.isFilled())
+        self.assertEqual(order.getExecutionInfo().getPrice(), 10)
+        self.assertEqual(order.getExecutionInfo().getCommission(), VtraderBroker.COMMISSION_PER_ORDER)
+        self.assertEqual(len(vtrader.getActiveOrders()), 0)
+        self.assertEqual(vtrader.getCash(), 100 - 10 - VtraderBroker.COMMISSION_PER_ORDER)
+        self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), 1)
+        self.assertEqual(cb.eventCount, 2)
+        self.assertEqual(order.getFilled(), 1)
+        self.assertEqual(order.getRemaining(), 0)

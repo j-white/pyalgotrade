@@ -38,9 +38,11 @@ class StopOrder(broker.StopOrder, VtraderOrder):
 class StopLimitOrder(broker.StopLimitOrder, VtraderOrder):
     pass
 
+
 class VtraderBroker(broker.Broker):
-    """A Vtrader broker.
-    """
+    """A Vtrader broker."""
+    COMMISSION_PER_ORDER = 9.95
+
     def __init__(self, portfolio, username, password, url):
         broker.Broker.__init__(self)
         self.__activeOrders = {}
@@ -56,10 +58,6 @@ class VtraderBroker(broker.Broker):
 
     def getPositions(self):
         """Returns a dictionary that maps instruments to shares."""
-        raise NotImplementedError()
-
-    def getActiveOrders(self):
-        """Returns a sequence with the orders that are still active."""
         raise NotImplementedError()
 
     def placeOrder(self, order):
@@ -82,6 +80,30 @@ class VtraderBroker(broker.Broker):
             order.switchState(broker.Order.State.SUBMITTED)
         else:
             raise Exception("The order was already processed")
+
+    def getActiveOrders(self):
+        return self.__activeOrders.values()
+
+    def updateActiveOrders(self):
+        """Updates the state of the active orders by polling the server."""
+        for order in self.__activeOrders.values():
+            # Switch from SUBMITTED -> ACCEPTED
+            if order.isSubmitted():
+                order.switchState(broker.Order.State.ACCEPTED)
+                self.getOrderUpdatedEvent().emit(self, order)
+
+            if order.isAccepted():
+                # Update the order.
+                orderExecutionInfo = broker.OrderExecutionInfo(10, order.getQuantity(), self.COMMISSION_PER_ORDER, datetime.datetime.now())
+                order.setExecuted(orderExecutionInfo)
+
+                if not order.isActive():
+                    del self.__activeOrders[order.getId()]
+                    self.getOrderUpdatedEvent().emit(self, order)
+            else:
+                assert(not order.isActive())
+                del self.__activeOrders[order.getId()]
+                self.getOrderUpdatedEvent().emit(self, order)
 
     def createMarketOrder(self, action, instrument, quantity, onClose=False):
         return MarketOrder(-1, action, instrument, quantity, onClose)
