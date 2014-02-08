@@ -324,6 +324,10 @@ class MockVtraderServerTestCase(unittest.TestCase):
         except ReactorAlreadyRunning:
             pass
 
+    @classmethod
+    def tearDownClass(cls):
+        reactor.callFromThread(reactor.stop)
+
     def get_brokers(self, cash, barFeed):
         """ Returns both a VirtualTraderBroker and a BacktestingBroker.
             The VirtualTraderBroker interfaces with a mock webservice that is backed

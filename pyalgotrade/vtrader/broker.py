@@ -119,9 +119,9 @@ class VtraderBroker(broker.Broker):
         return StopLimitOrder(-1, action, instrument, limitPrice, stopPrice, quantity)
 
     def cancelOrder(self, order):
-        """Requests an order to be canceled. If the order is filled an Exception is raised.
-
-        :param order: The order to cancel.
-        :type order: :class:`Order`.
-        """
-        raise NotImplementedError()
+        activeOrder = self.__activeOrders.get(order.getId())
+        if activeOrder is None:
+            raise Exception("The order is not active anymore")
+        if activeOrder.isFilled():
+            raise Exception("Can't cancel order that has already been filled")
+        activeOrder.switchState(broker.Order.State.CANCELED)
