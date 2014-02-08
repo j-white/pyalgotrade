@@ -21,7 +21,7 @@ import unittest
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 
-from pyalgotrade.vtrader import VtraderBroker
+from pyalgotrade.vtrader import VtraderBroker, VtraderClient
 from pyalgotrade import broker
 from pyalgotrade.broker import backtesting
 
@@ -71,62 +71,22 @@ class PathResource(resource.Resource):
 
 class PortfolioPositions(JSONResource):
     JSON = """ {
-                "data": [
-                    {
-                        "RowId": "74c09ff9-382f-41cb-bc72-96faf8e2fd2b",
-                        "PortfolioId": "{{ portfolio_id }}",
-                        "IsSymbolValid": true,
-                        "IsOption": false,
-                        "HasStockGuideProfile": false,
-                        "KeySymbol": "ca;BB",
-                        "LongPosition": {
-                            "RawData": 30,
-                            "FormattedData": "30"
-                        },
-                        "ShortPosition": {
-                            "RawData": 0,
-                            "FormattedData": "0"
-                        },
-                        "PortfolioName": "test",
-                        "Currency": null,
-                        "Symbol": "BB",
-                        "Exchange": "MX",
-                        "Quantity": {
-                            "RawData": 1,
-                            "FormattedData": "1"
-                        },
-                        "Last": {
-                            "RawData": 4.2,
-                            "FormattedData": "4.20"
-                        },
-                        "DailyChange": {
-                            "RawData": 2700,
-                            "FormattedData": ""
-                        },
-                        "GainLoss": {
-                            "RawData": 8820,
-                            "FormattedData": ""
-                        },
-                        "MarketValue": {
-                            "RawData": 12600,
-                            "FormattedData": "12,600.00"
-                        },
-                        "PortfolioMarketValuePerc": {
-                            "RawData": 0.06383665921483442,
-                            "FormattedData": "6.38 %"
-                        },
-                        "AvgCostValue": {
-                            "RawData": 1.26,
-                            "FormattedData": "1.26"
-                        },
-                        "InitialValue": {
-                            "RawData": 3780,
-                            "FormattedData": "3,780.00"
-                        }
-                    }
-                ],
-                "total": 1
-            }"""
+                    "data": [
+                        {%- for instrument, quantity in broker.getPositions().iteritems() %}
+                        {%- if not loop.first -%},{%- endif -%}
+                            {
+                                "PortfolioId": "{{ portfolio_id }}",
+                                "Symbol": "{{ instrument }}",
+                                "Quantity": {
+                                    "RawData": {{ quantity }},
+                                    "FormattedData": "{{ quantity }}"
+                                }
+                            }
+                        {% endfor %}
+                    ],
+                    "total": {{ broker.getPositions()|length }}
+                }"""
+
 
     def __init__(self, site):
         JSONResource.__init__(self)
@@ -134,7 +94,7 @@ class PortfolioPositions(JSONResource):
 
     def render_POST(self, request):
         JSONResource.render_GET(self, request)
-        response = self.j2env.from_string(self.JSON).render(portfolio_id=self.site.portfolio_id)
+        response = self.j2env.from_string(self.JSON).render(portfolio_id=self.site.portfolio_id, broker=self.site.broker)
         return str(response)
 
 class PortfolioStrategyPositions(JSONResource):
@@ -263,6 +223,8 @@ class PortfolioOrdersAndTransactions(JSONResource):
         if portfolio_id.lower() != self.site.portfolio_id.lower():
             raise Exception("Invalid portfolio id " + portfolio_id)
         number_of_orders_to_show = int(request.args['nbOrdersShow'][0])
+        if number_of_orders_to_show <= 0:
+            raise Exception("Invalid nbOrdersShow " + number_of_orders_to_show)
 
         JSONResource.render_GET(self, request)
         response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker)
@@ -277,12 +239,19 @@ class OrderCreate(resource.Resource):
 
     def render_POST(self, request):
         instrument = request.args['OrderLegs[0].DisplaySymbol'][0]
-        action = int(request.args['OrderLegs[0].Action'][0])
+        vtrader_action = int(request.args['OrderLegs[0].Action'][0])
         quantity = int(request.args['OrderLegs[0].Quantity'][0])
         type = request.args['OrderType'][0]
 
+
+        pyalgo_action = broker.Order.Action.BUY
+        if vtrader_action == VtraderClient.Action.BUY_STOCK:
+            pyalgo_action = broker.Order.Action.BUY
+        elif vtrader_action == VtraderClient.Action.SELL_STOCK:
+            pyalgo_action = broker.Order.Action.SELL
+
         if type == 'Market':
-            order = self.site.broker.createMarketOrder(broker.Order.Action.BUY, instrument, quantity)
+            order = self.site.broker.createMarketOrder(pyalgo_action, instrument, quantity)
             self.site.broker.placeOrder(order)
 
         return "Your order has been submitted"

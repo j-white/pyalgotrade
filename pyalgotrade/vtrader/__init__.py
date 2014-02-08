@@ -18,3 +18,4 @@
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 from broker import VtraderBroker
+from client import VtraderClient
