@@ -69,6 +69,74 @@ class PathResource(resource.Resource):
             return self
         return resource.Resource.getChild(self, name, request)
 
+class PortfolioPositions(JSONResource):
+    JSON = """ {
+                "data": [
+                    {
+                        "RowId": "74c09ff9-382f-41cb-bc72-96faf8e2fd2b",
+                        "PortfolioId": "{{ portfolio_id }}",
+                        "IsSymbolValid": true,
+                        "IsOption": false,
+                        "HasStockGuideProfile": false,
+                        "KeySymbol": "ca;BB",
+                        "LongPosition": {
+                            "RawData": 30,
+                            "FormattedData": "30"
+                        },
+                        "ShortPosition": {
+                            "RawData": 0,
+                            "FormattedData": "0"
+                        },
+                        "PortfolioName": "test",
+                        "Currency": null,
+                        "Symbol": "BB",
+                        "Exchange": "MX",
+                        "Quantity": {
+                            "RawData": 1,
+                            "FormattedData": "1"
+                        },
+                        "Last": {
+                            "RawData": 4.2,
+                            "FormattedData": "4.20"
+                        },
+                        "DailyChange": {
+                            "RawData": 2700,
+                            "FormattedData": ""
+                        },
+                        "GainLoss": {
+                            "RawData": 8820,
+                            "FormattedData": ""
+                        },
+                        "MarketValue": {
+                            "RawData": 12600,
+                            "FormattedData": "12,600.00"
+                        },
+                        "PortfolioMarketValuePerc": {
+                            "RawData": 0.06383665921483442,
+                            "FormattedData": "6.38 %"
+                        },
+                        "AvgCostValue": {
+                            "RawData": 1.26,
+                            "FormattedData": "1.26"
+                        },
+                        "InitialValue": {
+                            "RawData": 3780,
+                            "FormattedData": "3,780.00"
+                        }
+                    }
+                ],
+                "total": 1
+            }"""
+
+    def __init__(self, site):
+        JSONResource.__init__(self)
+        self.site = site
+
+    def render_POST(self, request):
+        JSONResource.render_GET(self, request)
+        response = self.j2env.from_string(self.JSON).render(portfolio_id=self.site.portfolio_id)
+        return str(response)
+
 class PortfolioStrategyPositions(JSONResource):
     JSON = """ {
                     "data": [
@@ -242,6 +310,10 @@ class VtraderBrokerSite(server.Site):
         # /VirtualTrader/Portfolio
         portfolio = PathResource()
         virtualtrader.putChild('Portfolio', portfolio)
+
+        # /VirtualTrader/Portfolio/PortfolioStrategyPositions_AjaxGrid
+        portfolio_positions = PortfolioPositions(self)
+        portfolio.putChild('PortfolioPositions_AjaxGrid', portfolio_positions)
 
         # /VirtualTrader/Portfolio/PortfolioStrategyPositions_AjaxGrid
         portfolio_strategy_positions = PortfolioStrategyPositions(self)

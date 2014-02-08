@@ -171,6 +171,13 @@ class VtraderClient():
             leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
         return leg
 
+    def get_positions(self):
+        positions = {}
+        position_rows = self._get_portfolio_positions()['data']
+        for position in position_rows:
+            positions[position['Symbol'].lower()] = int(position['Quantity']['RawData'])
+        return positions
+
     def get_last_orderid_for_instrument(self, instrument):
         pass
 

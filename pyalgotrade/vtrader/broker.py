@@ -54,11 +54,12 @@ class VtraderBroker(broker.Broker):
 
     def getShares(self, instrument):
         """Returns the number of shares for an instrument."""
-        raise NotImplementedError()
+        positions = self.getPositions()
+        return positions[instrument] if positions.has_key(instrument) else 0
 
     def getPositions(self):
         """Returns a dictionary that maps instruments to shares."""
-        raise NotImplementedError()
+        return self.client.get_positions()
 
     def placeOrder(self, order):
         if order.isInitial():
