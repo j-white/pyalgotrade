@@ -116,6 +116,89 @@ class MarketOrderTestCase(MockVtraderServerTestCase):
         self.assertEqual(order.getFilled(), 1)
         self.assertEqual(order.getRemaining(), 0)
 
+    def testFailToBuy(self):
+        vtrader, backtest = self.get_brokers(5, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
+        barsBuilder = BarsBuilder(MockVtraderServerTestCase.TestInstrument, bar.Frequency.MINUTE)
+
+        order = vtrader.createMarketOrder(broker.Order.Action.BUY, MockVtraderServerTestCase.TestInstrument, 1)
+
+        # Fail to buy. No money.
+        cb = Callback()
+        vtrader.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
+        vtrader.placeOrder(order)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        backtest.onBars(*barsBuilder.nextTuple(10, 15, 8, 12))
+        vtrader.updateActiveOrders()
+        self.assertTrue(order.isAccepted())
+        self.assertEqual(order.getExecutionInfo(), None)
+        self.assertEqual(len(vtrader.getActiveOrders()), 1)
+        self.assertEqual(vtrader.getCash(), 5)
+        self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), 0)
+        self.assertEqual(cb.eventCount, 1)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+
+        # Fail to buy. No money. Canceled due to session close.
+        cb = Callback()
+        vtrader.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
+        backtest.onBars(*barsBuilder.nextTuple(11, 15, 8, 12, sessionClose=True))
+        vtrader.updateActiveOrders()
+        self.assertTrue(order.isCanceled())
+        self.assertEqual(order.getExecutionInfo(), None)
+        self.assertEqual(len(vtrader.getActiveOrders()), 0)
+        self.assertEqual(vtrader.getCash(), 5)
+        self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), 0)
+        self.assertEqual(cb.eventCount, 1)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+
+    # def testSellShort(self):
+    #     vtrader, backtest = self.get_brokers(100, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
+    #     barsBuilder = BarsBuilder(MockVtraderServerTestCase.TestInstrument, bar.Frequency.MINUTE)
+    #
+    #     # Buy 1
+    #     order = vtrader.createMarketOrder(broker.Order.Action.BUY, MockVtraderServerTestCase.TestInstrument, 1)
+    #     self.assertEqual(order.getFilled(), 0)
+    #     self.assertEqual(order.getRemaining(), 1)
+    #     vtrader.placeOrder(order)
+    #     backtest.onBars(*barsBuilder.nextTuple(100, 100, 100, 100))
+    #     vtrader.updateActiveOrders()
+    #     self.assertEqual(order.getFilled(), 1)
+    #     self.assertEqual(order.getRemaining(), 0)
+    #     self.assertTrue(order.isFilled())
+    #     self.assertEqual(order.getExecutionInfo().getCommission(),  VtraderBroker.COMMISSION_PER_ORDER)
+    #     self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), 1)
+    #     self.assertEqual(vtrader.getCash(), 0)
+    #
+    #     # Sell 2
+    #     order = vtrader.createMarketOrder(broker.Order.Action.SELL_SHORT, MockVtraderServerTestCase.TestInstrument, 2)
+    #     self.assertEqual(order.getFilled(), 0)
+    #     self.assertEqual(order.getRemaining(), 2)
+    #     vtrader.placeOrder(order)
+    #     backtest.onBars(*barsBuilder.nextTuple(100, 100, 100, 100))
+    #     vtrader.updateActiveOrders()
+    #     self.assertEqual(order.getFilled(), 2)
+    #     self.assertEqual(order.getRemaining(), 0)
+    #     self.assertTrue(order.isFilled())
+    #     self.assertEqual(order.getExecutionInfo().getCommission(), 0)
+    #     self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), -1)
+    #     self.assertEqual(vtrader.getCash(), 200)
+    #
+    #     # Buy 1
+    #     order = vtrader.createMarketOrder(broker.Order.Action.BUY_TO_COVER, MockVtraderServerTestCase.TestInstrument, 1)
+    #     vtrader.placeOrder(order)
+    #     self.assertEqual(order.getFilled(), 0)
+    #     self.assertEqual(order.getRemaining(), 1)
+    #     backtest.onBars(*barsBuilder.nextTuple(100, 100, 100, 100))
+    #     vtrader.updateActiveOrders()
+    #     self.assertTrue(order.isFilled())
+    #     self.assertEqual(order.getFilled(), 1)
+    #     self.assertEqual(order.getRemaining(), 0)
+    #     self.assertEqual(order.getExecutionInfo().getCommission(), 0)
+    #     self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), 0)
+    #     self.assertEqual(vtrader.getCash(), 100)
+
     def testCancel(self):
         vtrader, backtest = self.get_brokers(100, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
         barsBuilder = BarsBuilder(MockVtraderServerTestCase.TestInstrument, bar.Frequency.MINUTE)
