@@ -115,3 +115,22 @@ class MarketOrderTestCase(MockVtraderServerTestCase):
         self.assertEqual(cb.eventCount, 2)
         self.assertEqual(order.getFilled(), 1)
         self.assertEqual(order.getRemaining(), 0)
+
+    def testCancel(self):
+        vtrader, backtest = self.get_brokers(100, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
+        barsBuilder = BarsBuilder(MockVtraderServerTestCase.TestInstrument, bar.Frequency.MINUTE)
+
+        order = vtrader.createMarketOrder(broker.Order.Action.BUY, MockVtraderServerTestCase.TestInstrument, 1)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        vtrader.placeOrder(order)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        vtrader.cancelOrder(order)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        backtest.onBars(*barsBuilder.nextTuple(10, 10, 10, 10))
+        vtrader.updateActiveOrders()
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        self.assertTrue(order.isCanceled())

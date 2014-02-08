@@ -27,6 +27,7 @@ from pyalgotrade.broker import backtesting
 
 from twisted.web import server, resource
 from twisted.internet import reactor
+from twisted.internet.error import ReactorAlreadyRunning
 from threading import Thread
 import uuid
 from jinja2 import Environment
@@ -317,12 +318,11 @@ class MockVtraderServerTestCase(unittest.TestCase):
     TestInstrument = "bb"
     PortfolioName = "test"
 
-    def setUp(self):
-        self.__reactor_started = False
-
-    def tearDown(self):
-        if self.__reactor_started:
-            reactor.callFromThread(reactor.stop)
+    def runReactor(self):
+        try:
+            reactor.run(False)
+        except ReactorAlreadyRunning:
+            pass
 
     def get_brokers(self, cash, barFeed):
         """ Returns both a VirtualTraderBroker and a BacktestingBroker.
@@ -340,8 +340,7 @@ class MockVtraderServerTestCase(unittest.TestCase):
         port = reactor.listenTCP(0, site)
 
         # Fire up the reactor
-        Thread(target=reactor.run, args=(False,)).start()
-        self.__reactor_started = True
+        Thread(target=self.runReactor).start()
 
         # Create a new broker pointing to the new site instance
         return VtraderBroker("test", "testuser", "testpass", "http://127.0.0.1:%d" % port.getHost().port), backtest
