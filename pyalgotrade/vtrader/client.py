@@ -160,6 +160,7 @@ class VtraderClient():
                 break
 
     def place_order(self, order):
+        # Values used for market orders
         limit_price = ''
         stop_price = ''
 
@@ -168,9 +169,14 @@ class VtraderClient():
         if order.getType() in [broker.Order.Type.STOP, broker.Order.Type.STOP_LIMIT]:
             stop_price = order.getStopPrice()
 
+        if order.getType() is not broker.Order.Type.MARKET:
+            duration = 1 if order.getGoodTillCanceled() else 0
+        else:
+            duration = 'GoodTillCanceled' if order.getGoodTillCanceled() else 'Day'
+
         url = "%s/VirtualTrader/Order/Create" % self.base_url
         data = {
-            'Duration': 'Day',
+            'Duration': duration,
             'Limit': limit_price,
             'Stop': stop_price,
             'PortfolioId': self.portfolio_id,

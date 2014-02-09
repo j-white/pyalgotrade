@@ -251,6 +251,7 @@ class OrderCreate(resource.Resource):
 
     def render_POST(self, request):
         instrument = request.args['OrderLegs[0].DisplaySymbol'][0]
+        duration = request.args['Duration'][0]
         vtrader_action = int(request.args['OrderLegs[0].Action'][0])
         quantity = int(request.args['OrderLegs[0].Quantity'][0])
         type = VtraderClient.VTRADER_TO_ALGO_ORDER_TYPE[request.args['OrderType'][0]]
@@ -275,7 +276,10 @@ class OrderCreate(resource.Resource):
         except ValueError:
             stop = None
 
-        order = None
+        good_till_canceled = False
+        if duration in ['1', 'GoodTillCanceled']:
+            good_till_canceled = True
+
         if type == broker.Order.Type.MARKET:
             order = self.site.broker.createMarketOrder(pyalgo_action, instrument, quantity)
         elif type == broker.Order.Type.LIMIT:
@@ -284,12 +288,14 @@ class OrderCreate(resource.Resource):
             order = self.site.broker.createStopOrder(pyalgo_action, instrument, stop, quantity)
         elif type == broker.Order.Type.STOP_LIMIT:
             order = self.site.broker.createStopLimitOrder(pyalgo_action, instrument, stop, limit, quantity)
+        else:
+            raise Exception("Invalid order type")
 
-        if order is not None:
-            self.site.placeOrder(order)
-            return "Your order has been submitted"
+        if good_till_canceled:
+            order.setGoodTillCanceled(True)
 
-        raise Exception("Invalid order type")
+        self.site.placeOrder(order)
+        return "Your order has been submitted"
 
 class VtraderBrokerSite(server.Site):
     def __init__(self, portfolio, broker):

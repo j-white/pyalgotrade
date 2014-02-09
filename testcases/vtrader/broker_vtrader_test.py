@@ -60,6 +60,50 @@ class VtraderBrokerTestCase:
     Factory = BacktestBrokerFactory()
     Visitor = BacktestBrokerVisitor()
 
+
+from pyalgotrade import broker
+from pyalgotrade import bar
+from pyalgotrade import barfeed
+from pyalgotrade.broker import backtesting
+
+class MyTestCase(VtraderBrokerTestCase, common.BaseTestCase):
+    def testBuy_GTC(self):
+        brk = self.Factory.getBroker(10, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
+        barsBuilder = common.BarsBuilder(common.BaseTestCase.TestInstrument, bar.Frequency.MINUTE)
+
+        order = brk.createLimitOrder(broker.Order.Action.BUY, common.BaseTestCase.TestInstrument, 4, 2)
+        order.setGoodTillCanceled(True)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 2)
+
+        # Fail to buy (couldn't get specific price).
+        cb = common.Callback()
+        brk.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
+        brk.placeOrder(order)
+        # Set sessionClose to true test that the order doesn't get canceled.
+        self.Visitor.onBars(brk, *barsBuilder.nextTuple(10, 15, 8, 12, sessionClose=True))
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 2)
+        self.assertTrue(order.isAccepted())
+        self.assertEqual(order.getExecutionInfo(), None)
+        self.assertEqual(len(brk.getActiveOrders()), 1)
+        self.assertEqual(brk.getCash(), 10)
+        self.assertEqual(brk.getShares(common.BaseTestCase.TestInstrument), 0)
+        self.assertEqual(cb.eventCount, 1)
+
+        # Buy
+        cb = common.Callback()
+        brk.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
+        self.Visitor.onBars(brk, *barsBuilder.nextTuple(2, 15, 1, 12))
+        self.assertEqual(order.getFilled(), 2)
+        self.assertEqual(order.getRemaining(), 0)
+        self.assertTrue(order.isFilled())
+        self.assertEqual(order.getExecutionInfo().getPrice(), 2)
+        self.assertEqual(len(brk.getActiveOrders()), 0)
+        self.assertEqual(brk.getCash(), 6)
+        self.assertEqual(brk.getShares(common.BaseTestCase.TestInstrument), 2)
+        self.assertEqual(cb.eventCount, 1)
+
 class BrokerTestCase(VtraderBrokerTestCase, common.BrokerTestCase):
     pass
 
