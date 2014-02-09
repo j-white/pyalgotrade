@@ -283,7 +283,7 @@ class OrderCreate(resource.Resource):
         elif type == broker.Order.Type.STOP:
             order = self.site.broker.createStopOrder(pyalgo_action, instrument, stop, quantity)
         elif type == broker.Order.Type.STOP_LIMIT:
-            order = self.site.broker.createStopOrder(pyalgo_action, instrument, stop, limit, quantity)
+            order = self.site.broker.createStopLimitOrder(pyalgo_action, instrument, stop, limit, quantity)
 
         if order is not None:
             self.site.placeOrder(order)
@@ -388,7 +388,7 @@ class MockVtraderServerTestCase(unittest.TestCase):
             by the BacktestingBroker.
         """
         # Create a backtesting broker used to back the mock server
-        commission = backtesting.FixedPerTrade(VtraderBroker.COMMISSION_PER_ORDER)
+        commission = backtesting.FixedPerTrade(VtraderBroker.COMMISSION_PER_TRADE)
         backtest = backtesting.Broker(cash, barFeed, commission=commission)
 
         # Create a new site instance

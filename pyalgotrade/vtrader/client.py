@@ -135,7 +135,7 @@ class VtraderClient():
 
         return -1
 
-    def update_order(self, order, commission=0.0):
+    def update_order(self, order, commission):
         orders = self._get_portfolio_orders_and_transactions()['data']
 
         for r_order in orders:
@@ -143,11 +143,16 @@ class VtraderClient():
                 is_open = bool(r_order['IsOpenOrder'])
                 is_aborted = bool(r_order['IsAbortedOrder'])
                 is_partial = bool(r_order['IsPartialOrder'])
-                qty = int(r_order['CumulativeQuantity'])
-                avg_price = float(r_order['CumulativeQuantityAveragePrice'])
+                quantity = int(r_order['CumulativeQuantity'])
+                average_price = float(r_order['CumulativeQuantityAveragePrice'])
+                price = average_price * quantity
 
                 if not is_open and not is_aborted and not is_partial:
-                    orderExecutionInfo = broker.OrderExecutionInfo(avg_price * qty, qty, commission, datetime.now())
+                    fees = 0.0
+                    if commission is not None:
+                        fees = commission.calculate(order, price, quantity)
+
+                    orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, fees, datetime.now())
                     order.setExecuted(orderExecutionInfo)
                 elif is_aborted:
                     order.switchState(broker.Order.State.CANCELED)

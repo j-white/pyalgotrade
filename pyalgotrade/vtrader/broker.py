@@ -19,6 +19,7 @@
 """
 
 from pyalgotrade import broker
+from pyalgotrade.broker import backtesting
 from client import VtraderClient
 
 class VtraderOrder:
@@ -42,12 +43,13 @@ class StopLimitOrder(VtraderOrder, broker.StopLimitOrder):
 
 class VtraderBroker(broker.Broker):
     """A Vtrader broker."""
-    COMMISSION_PER_ORDER = 9.95
+    COMMISSION_PER_TRADE = 9.95
 
-    def __init__(self, portfolio, username, password, url):
+    def __init__(self, portfolio, username, password, url, commission=backtesting.FixedPerTrade(COMMISSION_PER_TRADE)):
         broker.Broker.__init__(self)
         self.__activeOrders = {}
         self.client = VtraderClient(portfolio, username, password, url)
+        self.commission = commission
 
     def getCash(self):
         """Returns the amount of available buying power in dollars."""
@@ -96,7 +98,7 @@ class VtraderBroker(broker.Broker):
 
             if order.isAccepted():
                 # Update the order
-                self.client.update_order(order, commission=self.COMMISSION_PER_ORDER)
+                self.client.update_order(order, commission=self.commission)
 
                 if not order.isActive():
                     del self.__activeOrders[order.getId()]
