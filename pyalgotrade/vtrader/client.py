@@ -107,6 +107,32 @@ class VtraderClient():
         account_balance = self._get_account_balance()
         return float(account_balance['MoneyMarketCashValue']['RawData'])
 
+    def get_last_orderid_for_instrument(self, instrument):
+        orders = self._get_portfolio_orders_and_transactions()['data']
+        for order in orders:
+            if order['Symbol'].lower() == instrument.lower():
+                return order['Id']
+        return -1
+
+    def update_order(self, order, commission=0.0):
+        orders = self._get_portfolio_orders_and_transactions()['data']
+
+        for r_order in orders:
+            if r_order['Id'] == order.getId():
+                is_open = bool(r_order['IsOpenOrder'])
+                is_aborted = bool(r_order['IsAbortedOrder'])
+                is_partial = bool(r_order['IsPartialOrder'])
+                qty = int(r_order['CumulativeQuantity'])
+                avg_price = float(r_order['CumulativeQuantityAveragePrice'])
+
+                if not is_open and not is_aborted and not is_partial:
+                    orderExecutionInfo = broker.OrderExecutionInfo(avg_price * qty, qty, commission, datetime.now())
+                    order.setExecuted(orderExecutionInfo)
+                elif is_aborted:
+                    order.switchState(broker.Order.State.CANCELED)
+
+                break
+
     def place_order(self, order):
         url = "%s/VirtualTrader/Order/Create" % self.base_url
         data = {
@@ -191,9 +217,6 @@ class VtraderClient():
         for position in position_rows:
             positions[position['Symbol'].lower()] = int(position['Quantity']['RawData'])
         return positions
-
-    def get_last_orderid_for_instrument(self, instrument):
-        pass
 
     def get_account_value(self):
         return self.get_cash_value() + self.get_position_value()
@@ -281,6 +304,14 @@ class VtraderClient():
         url = "%s/VirtualTrader/Order/PortfolioTransactionHistory_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
         data = urllib.urlencode({
             'portfolioId': self.portfolio_id,
+            })
+        return self.__get_response_data(url, data, is_json=True)
+
+    def _get_portfolio_orders_and_transactions(self, nbOrdersShow=5):
+        url = "%s/VirtualTrader/Order/PortfolioOrdersAndTransactions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
+        data = urllib.urlencode({
+            'portfolioId': self.portfolio_id,
+            'nbOrdersShow': nbOrdersShow,
             })
         return self.__get_response_data(url, data, is_json=True)
 

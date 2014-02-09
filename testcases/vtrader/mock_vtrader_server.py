@@ -31,6 +31,7 @@ from twisted.internet.error import ReactorAlreadyRunning
 from threading import Thread
 import uuid
 from jinja2 import Environment
+import datetime
 
 class JSONResource(resource.Resource):
     isLeaf = True
@@ -181,38 +182,42 @@ class DashboardAccountBalance(JSONResource):
 class PortfolioOrdersAndTransactions(JSONResource):
     JSON = """ {
                 "data": [
-                    {
-                        "Id": "9ca2b5a7-08ab-4e3f-9669-fb992949c960",
-                        "PortfolioId": "{{ portfolio_id }}",
-                        "TransactionTime": "/Date(1391832375808)/",
-                        "IsOpenOrder": true,
-                        "IsPartialOrder": false,
-                        "IsAbortedOrder": false,
-                        "AbortedMessage": null,
-                        "IsStrategy": false,
-                        "KeySymbol": "ca;BB",
-                        "Symbol": "BB",
-                        "Exchange": "TSX",
-                        "UnderlyingSymbol": "",
-                        "UnderlyingExchange": "",
-                        "Description": "BLACKBERRY LIMITED",
-                        "Last": "10.86",
-                        "Bid": "10.85",
-                        "Ask": "10.87",
-                        "OrderStatus": "Pending New",
-                        "OrderType": "Market",
-                        "Side": "Buy",
-                        "PositionEffect": "",
-                        "TotalQuantity": "1",
-                        "CumulativeQuantity": "0",
-                        "CumulativeQuantityAveragePrice": "0.00",
-                        "RemainingQuantity": "1",
-                        "PriceLimit": null,
-                        "StopPrice": null,
-                        "TimeInForce": "Day"
-                    },
+                    {%- for order in orders %}
+                    {%- if not loop.first -%},{%- endif -%}
+                        {%- set execInfo = order.getExecutionInfo() if order.getExecutionInfo() else execInfo -%}
+                        {
+                            "Id": "{{ order.getId() }}",
+                            "PortfolioId": "{{ portfolio_id }}",
+                            "TransactionTime": "/Date(1391832375808)/",
+                            "IsOpenOrder": {{ order.isActive()|lower }},
+                            "IsPartialOrder": {{ order.isPartiallyFilled()|lower }},
+                            "IsAbortedOrder": {{ order.isCanceled()|lower }},
+                            "AbortedMessage": null,
+                            "IsStrategy": false,
+                            "KeySymbol": "ca;{{ order.getInstrument() }}",
+                            "Symbol": "{{ order.getInstrument()}}",
+                            "Exchange": "TSX",
+                            "UnderlyingSymbol": "",
+                            "UnderlyingExchange": "",
+                            "Description": "{{ order.getInstrument() }}",
+                            "Last": "10.86",
+                            "Bid": "10.85",
+                            "Ask": "10.87",
+                            "OrderStatus": "Pending New",
+                            "OrderType": "Market",
+                            "Side": "Buy",
+                            "PositionEffect": "",
+                            "TotalQuantity": "{{ order.getQuantity() }}",
+                            "CumulativeQuantity": "{{ execInfo.getQuantity() }}",
+                            "CumulativeQuantityAveragePrice": "{{ execInfo.getPrice() / execInfo.getQuantity() }}",
+                            "RemainingQuantity": "{{ order.getQuantity() - execInfo.getQuantity() }}",
+                            "PriceLimit": null,
+                            "StopPrice": null,
+                            "TimeInForce": "Day"
+                        }
+                    {% endfor %}
                 ],
-                "total": 1
+                "total": {{ orders|length }}
             }"""
 
     def __init__(self, site):
@@ -225,10 +230,14 @@ class PortfolioOrdersAndTransactions(JSONResource):
             raise Exception("Invalid portfolio id " + portfolio_id)
         number_of_orders_to_show = int(request.args['nbOrdersShow'][0])
         if number_of_orders_to_show <= 0:
-            raise Exception("Invalid nbOrdersShow " + number_of_orders_to_show)
+            raise Exception("Invalid nbOrdersShow %d" % number_of_orders_to_show)
+
+        last_n_orders = self.site.getOrders()[-number_of_orders_to_show:]
+        blankExecutionInfo = broker.OrderExecutionInfo(0, 1, 0, datetime.datetime.now())
 
         JSONResource.render_GET(self, request)
-        response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker)
+        response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker,
+                                                            orders=last_n_orders, execInfo = blankExecutionInfo)
         return str(response)
 
 class OrderCreate(resource.Resource):
@@ -244,7 +253,6 @@ class OrderCreate(resource.Resource):
         quantity = int(request.args['OrderLegs[0].Quantity'][0])
         type = request.args['OrderType'][0]
 
-
         pyalgo_action = broker.Order.Action.BUY
         if vtrader_action == VtraderClient.Action.BUY_STOCK:
             pyalgo_action = broker.Order.Action.BUY
@@ -253,7 +261,7 @@ class OrderCreate(resource.Resource):
 
         if type == 'Market':
             order = self.site.broker.createMarketOrder(pyalgo_action, instrument, quantity)
-            self.site.broker.placeOrder(order)
+            self.site.placeOrder(order)
 
         return "Your order has been submitted"
 
@@ -266,8 +274,18 @@ class VtraderBrokerSite(server.Site):
         # Register callbacks
         self.broker.getOrderUpdatedEvent().subscribe(self.onOrderUpdated)
 
+        # Used to keep track of the orders state
+        self.__orders = []
+
         self.root = self.get_root()
         server.Site.__init__(self, self.root)
+
+    def placeOrder(self, order):
+        self.__orders.append(order)
+        self.broker.placeOrder(order)
+
+    def getOrders(self):
+        return self.__orders
 
     def get_root(self):
         # /

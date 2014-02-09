@@ -26,18 +26,20 @@ class VtraderOrder:
     def setId(self, orderId):
         self.__id = orderId
 
-class MarketOrder(broker.MarketOrder, VtraderOrder):
+    def getId(self):
+        return self.__id
+
+class MarketOrder(VtraderOrder, broker.MarketOrder):
     pass
 
-class LimitOrder(broker.LimitOrder, VtraderOrder):
+class LimitOrder(VtraderOrder, broker.LimitOrder):
     pass
 
-class StopOrder(broker.StopOrder, VtraderOrder):
+class StopOrder(VtraderOrder, broker.StopOrder):
     pass
 
-class StopLimitOrder(broker.StopLimitOrder, VtraderOrder):
+class StopLimitOrder(VtraderOrder, broker.StopLimitOrder):
     pass
-
 
 class VtraderBroker(broker.Broker):
     """A Vtrader broker."""
@@ -94,9 +96,8 @@ class VtraderBroker(broker.Broker):
                 self.getOrderUpdatedEvent().emit(self, order)
 
             if order.isAccepted():
-                # Update the order.
-                orderExecutionInfo = broker.OrderExecutionInfo(10, order.getQuantity(), self.COMMISSION_PER_ORDER, datetime.datetime.now())
-                order.setExecuted(orderExecutionInfo)
+                # Update the order
+                self.client.update_order(order, commission=self.COMMISSION_PER_ORDER)
 
                 if not order.isActive():
                     del self.__activeOrders[order.getId()]
