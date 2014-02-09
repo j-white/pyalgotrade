@@ -59,6 +59,16 @@ class VtraderClient():
         CALL_OPTION = 2
         PUT_OPTION = 3
 
+     # Maps the order type to the proper Vtrader order type.
+    ALGO_TO_VTRADER_ORDER_TYPE =  {
+        broker.Order.Type.MARKET : 'Market',
+        broker.Order.Type.LIMIT : 'Limit',
+        broker.Order.Type.STOP_LIMIT : 'StopLimit',
+        broker.Order.Type.STOP : 'Stop'
+    }
+
+    VTRADER_TO_ALGO_ORDER_TYPE = {v:k for k, v in ALGO_TO_VTRADER_ORDER_TYPE.items()}
+
     def __init__(self, portfolio, username, password, url):
         self.base_url = url
         self.username = username
@@ -145,14 +155,22 @@ class VtraderClient():
                 break
 
     def place_order(self, order):
+        limit_price = ''
+        stop_price = ''
+
+        if order.getType() in [broker.Order.Type.LIMIT, broker.Order.Type.STOP_LIMIT]:
+            limit_price = order.getLimitPrice()
+        if order.getType() in [broker.Order.Type.STOP, broker.Order.Type.STOP_LIMIT]:
+            stop_price = order.getStopPrice()
+
         url = "%s/VirtualTrader/Order/Create" % self.base_url
         data = {
             'Duration': 'Day',
-            'Limit': '',
+            'Limit': limit_price,
+            'Stop': stop_price,
             'PortfolioId': self.portfolio_id,
-            'OrderType': 'Market',
+            'OrderType': self.ALGO_TO_VTRADER_ORDER_TYPE[order.getType()],
             'Status': '',
-            'Stop': '',
             'KeySymbol': self.__get_key(order.getInstrument()),
             'IsFutureTrade': False,
             'IsIndexOrCurrencyOptionTrade': False,
@@ -161,7 +179,7 @@ class VtraderClient():
 
         # We should repeat this for every leg in the spread, but we're only dealing with simple orders
         leg_index = 0
-        action = self.__get_action(order)
+        action = self._get_order_action(order)
         instrument_type = self.__get_instrument_type(order.getInstrument())
         if instrument_type == self.InstrumentType.STOCK:
             data.update(self.__get_stock_leg(leg_index, action, order))
@@ -174,31 +192,31 @@ class VtraderClient():
         if not 'Your order has been submitted' in response:
             raise OrderFailed("Received invalid response: %s" % response)
 
-    def __get_action(self, order):
+    def _get_order_action(self, order):
         """ Maps the order action to the proper Vtrader action code. """
-        action = None
+
+        stockOrderActionMap = {
+            broker.Order.Action.BUY : self.Action.BUY_STOCK,
+            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_STOCK,
+            broker.Order.Action.SELL : self.Action.SELL_STOCK,
+            broker.Order.Action.SELL_SHORT : self.Action.SELL_STOCK_SHORT,
+        }
+
+        optionOrderActionMap = {
+            broker.Order.Action.BUY : self.Action.BUY_OPTION,
+            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_OPTION_TO_CLOSE,
+            broker.Order.Action.SELL : self.Action.SELL_OPTION_TO_CLOSE,
+            broker.Order.Action.SELL_SHORT : self.Action.SELL_OPTION,
+        }
+
+        orderActionMap = {
+            self.InstrumentType.STOCK : stockOrderActionMap,
+            self.InstrumentType.CALL_OPTION : optionOrderActionMap,
+            self.InstrumentType.PUT_OPTION : optionOrderActionMap,
+        }
+
         instrument_type = self.__get_instrument_type(order.getInstrument())
-        if instrument_type == self.InstrumentType.STOCK:
-            if order.getAction() == broker.Order.Action.BUY or order.getAction() == broker.Order.Action.BUY_TO_COVER:
-                action = self.Action.BUY_STOCK
-            elif order.getAction() == broker.Order.Action.SELL:
-                action = self.Action.SELL_STOCK
-            elif order.getAction() == broker.Order.Action.SELL_SHORT:
-                action = self.Action.SELL_STOCK_SHORT
-        elif instrument_type == self.InstrumentType.CALL_OPTION or instrument_type == self.InstrumentType.PUT_OPTION:
-            if order.getAction() == broker.Order.Action.BUY:
-                action = self.Action.BUY_OPTION
-            if order.getAction() == broker.Order.Action.BUY_TO_COVER:
-                action = self.Action.BUY_OPTION_TO_CLOSE
-            elif order.getAction() == broker.Order.Action.SELL:
-                action = self.Action.SELL_OPTION_TO_CLOSE
-            elif order.getAction() == broker.Order.Action.SELL_SHORT:
-                action = self.Action.SELL_OPTION
-
-        if action is None:
-            raise Exception("Invalid instrument and action combination.")
-
-        return action
+        return orderActionMap[instrument_type][order.getAction()]
 
     def __get_stock_leg(self, id, action, order):
         leg_options = {

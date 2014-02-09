@@ -25,7 +25,10 @@ from pyalgotrade import broker
 from pyalgotrade import barfeed
 from pyalgotrade.vtrader.broker import VtraderBroker
 
-from mock_vtrader_server import MockVtraderServerTestCase
+from mock_vtrader_server import MockVtraderServerTestCase, tearDownReactor
+
+def tearDownModule():
+    tearDownReactor()
 
 class BarsBuilder(object):
     def __init__(self, instrument, frequency):
@@ -217,3 +220,46 @@ class MarketOrderTestCase(MockVtraderServerTestCase):
         self.assertEqual(order.getFilled(), 0)
         self.assertEqual(order.getRemaining(), 1)
         self.assertTrue(order.isCanceled())
+
+class LimitOrderTestCase(MockVtraderServerTestCase):
+    def testBuyAndSell_HitTargetPrice(self):
+        vtrader, backtest = self.get_brokers(100, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
+        barsBuilder = BarsBuilder(MockVtraderServerTestCase.TestInstrument, bar.Frequency.MINUTE)
+
+        # Buy
+        cb = Callback()
+        vtrader.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
+        order = vtrader.createLimitOrder(broker.Order.Action.BUY, MockVtraderServerTestCase.TestInstrument, 10, 1)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        vtrader.placeOrder(order)
+        backtest.onBars(*barsBuilder.nextTuple(12, 15, 8, 12))
+        vtrader.updateActiveOrders()
+        self.assertEqual(order.getFilled(), 1)
+        self.assertEqual(order.getRemaining(), 0)
+        self.assertTrue(order.isFilled())
+        self.assertEqual(order.getExecutionInfo().getPrice(), 10)
+        self.assertEqual(order.getExecutionInfo().getCommission(), VtraderBroker.COMMISSION_PER_ORDER)
+        self.assertEqual(len(vtrader.getActiveOrders()), 0)
+        self.assertEqual(vtrader.getCash(), 100 - 10 - VtraderBroker.COMMISSION_PER_ORDER)
+        self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), 1)
+        self.assertEqual(cb.eventCount, 2)
+
+        # Sell
+        cb = Callback()
+        vtrader.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
+        order = vtrader.createLimitOrder(broker.Order.Action.SELL, MockVtraderServerTestCase.TestInstrument, 15, 1)
+        vtrader.placeOrder(order)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        backtest.onBars(*barsBuilder.nextTuple(10, 17, 8, 10))
+        vtrader.updateActiveOrders()
+        self.assertEqual(order.getFilled(), 1)
+        self.assertEqual(order.getRemaining(), 0)
+        self.assertTrue(order.isFilled())
+        self.assertEqual(order.getExecutionInfo().getPrice(), 15)
+        self.assertEqual(order.getExecutionInfo().getCommission(), VtraderBroker.COMMISSION_PER_ORDER)
+        self.assertEqual(len(vtrader.getActiveOrders()), 0)
+        self.assertEqual(vtrader.getCash(), 100 - 10 + 15 - 2 * VtraderBroker.COMMISSION_PER_ORDER)
+        self.assertEqual(vtrader.getShares(MockVtraderServerTestCase.TestInstrument), 0)
+        self.assertEqual(cb.eventCount, 2)

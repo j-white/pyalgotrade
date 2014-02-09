@@ -253,7 +253,7 @@ class OrderCreate(resource.Resource):
         instrument = request.args['OrderLegs[0].DisplaySymbol'][0]
         vtrader_action = int(request.args['OrderLegs[0].Action'][0])
         quantity = int(request.args['OrderLegs[0].Quantity'][0])
-        type = request.args['OrderType'][0]
+        type = VtraderClient.VTRADER_TO_ALGO_ORDER_TYPE[request.args['OrderType'][0]]
 
         pyalgo_action = broker.Order.Action.BUY
         if vtrader_action == VtraderClient.Action.BUY_STOCK:
@@ -263,11 +263,33 @@ class OrderCreate(resource.Resource):
         elif vtrader_action == VtraderClient.Action.SELL_STOCK_SHORT:
             pyalgo_action = broker.Order.Action.SELL_SHORT
 
-        if type == 'Market':
-            order = self.site.broker.createMarketOrder(pyalgo_action, instrument, quantity)
-            self.site.placeOrder(order)
+        # Parse the stop and limit fields, catch the exception since
+        # these won't always be set
+        try:
+            limit = float(request.args['Limit'][0])
+        except ValueError:
+            limit = None
 
-        return "Your order has been submitted"
+        try:
+            stop = float(request.args['Stop'][0])
+        except ValueError:
+            stop = None
+
+        order = None
+        if type == broker.Order.Type.MARKET:
+            order = self.site.broker.createMarketOrder(pyalgo_action, instrument, quantity)
+        elif type == broker.Order.Type.LIMIT:
+            order = self.site.broker.createLimitOrder(pyalgo_action, instrument, limit, quantity)
+        elif type == broker.Order.Type.STOP:
+            order = self.site.broker.createStopOrder(pyalgo_action, instrument, stop, quantity)
+        elif type == broker.Order.Type.STOP_LIMIT:
+            order = self.site.broker.createStopOrder(pyalgo_action, instrument, stop, limit, quantity)
+
+        if order is not None:
+            self.site.placeOrder(order)
+            return "Your order has been submitted"
+
+        raise Exception("Invalid order type")
 
 class VtraderBrokerSite(server.Site):
     def __init__(self, portfolio, broker):
@@ -337,19 +359,28 @@ class VtraderBrokerSite(server.Site):
     def onOrderUpdated(self, broker_, order):
         pass
 
+def tearDownReactor():
+    reactor.callFromThread(reactor.stop)
+
 class MockVtraderServerTestCase(unittest.TestCase):
     TestInstrument = "bb"
     PortfolioName = "test"
+    PortfolioUsername = "testuser"
+    PortfolioPassword = "testpass"
+
+    def setUp(self):
+        self.port = None
+
+    def tearDown(self):
+        if self.port is not None:
+            self.port.stopListening()
+            self.port = None
 
     def runReactor(self):
         try:
             reactor.run(False)
         except ReactorAlreadyRunning:
             pass
-
-    @classmethod
-    def tearDownClass(cls):
-        reactor.callFromThread(reactor.stop)
 
     def get_brokers(self, cash, barFeed):
         """ Returns both a VirtualTraderBroker and a BacktestingBroker.
@@ -364,10 +395,14 @@ class MockVtraderServerTestCase(unittest.TestCase):
         site = VtraderBrokerSite(self.PortfolioName, backtest)
 
         # Add the new site
-        port = reactor.listenTCP(0, site)
+        self.port = reactor.listenTCP(0, site)
 
         # Fire up the reactor
         Thread(target=self.runReactor).start()
 
-        # Create a new broker pointing to the new site instance
-        return VtraderBroker("test", "testuser", "testpass", "http://127.0.0.1:%d" % port.getHost().port), backtest
+        # Create a broker pointing to the new site instance
+        vtrader = VtraderBroker(self.PortfolioName, self.PortfolioUsername, self.PortfolioPassword,
+                             "http://127.0.0.1:%d" % self.port.getHost().port)\
+
+        # Return both brokers
+        return vtrader, backtest
