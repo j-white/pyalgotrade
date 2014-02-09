@@ -18,7 +18,6 @@
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 
-import datetime
 from pyalgotrade import broker
 from client import VtraderClient
 

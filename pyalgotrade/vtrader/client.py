@@ -25,6 +25,7 @@ import hashlib
 import json
 import string
 import os
+import re
 from datetime import datetime
 
 from pyalgotrade import broker
@@ -109,9 +110,19 @@ class VtraderClient():
 
     def get_last_orderid_for_instrument(self, instrument):
         orders = self._get_portfolio_orders_and_transactions()['data']
+
+        # Parse the transaction time from the orders
+        for order in orders:
+            order['_timestamp'] = float(re.search('(\d+\.\d+)', order['TransactionTime']).group(0))
+
+        # Sort them by timestamp in descending order
+        orders = sorted(orders, key=lambda order : -order['_timestamp'])
+
+        # Use the id of the first order that matches the given instrument
         for order in orders:
             if order['Symbol'].lower() == instrument.lower():
                 return order['Id']
+
         return -1
 
     def update_order(self, order, commission=0.0):
@@ -168,7 +179,7 @@ class VtraderClient():
         action = None
         instrument_type = self.__get_instrument_type(order.getInstrument())
         if instrument_type == self.InstrumentType.STOCK:
-            if order.getAction() == broker.Order.Action.BUY:
+            if order.getAction() == broker.Order.Action.BUY or order.getAction() == broker.Order.Action.BUY_TO_COVER:
                 action = self.Action.BUY_STOCK
             elif order.getAction() == broker.Order.Action.SELL:
                 action = self.Action.SELL_STOCK

@@ -31,6 +31,8 @@ from twisted.internet.error import ReactorAlreadyRunning
 from threading import Thread
 import uuid
 from jinja2 import Environment
+
+import time
 import datetime
 
 class JSONResource(resource.Resource):
@@ -188,7 +190,7 @@ class PortfolioOrdersAndTransactions(JSONResource):
                         {
                             "Id": "{{ order.getId() }}",
                             "PortfolioId": "{{ portfolio_id }}",
-                            "TransactionTime": "/Date(1391832375808)/",
+                            "TransactionTime": "/Date({{ order.timestamp }})/",
                             "IsOpenOrder": {{ order.isActive()|lower }},
                             "IsPartialOrder": {{ order.isPartiallyFilled()|lower }},
                             "IsAbortedOrder": {{ order.isCanceled()|lower }},
@@ -258,6 +260,8 @@ class OrderCreate(resource.Resource):
             pyalgo_action = broker.Order.Action.BUY
         elif vtrader_action == VtraderClient.Action.SELL_STOCK:
             pyalgo_action = broker.Order.Action.SELL
+        elif vtrader_action == VtraderClient.Action.SELL_STOCK_SHORT:
+            pyalgo_action = broker.Order.Action.SELL_SHORT
 
         if type == 'Market':
             order = self.site.broker.createMarketOrder(pyalgo_action, instrument, quantity)
@@ -281,6 +285,7 @@ class VtraderBrokerSite(server.Site):
         server.Site.__init__(self, self.root)
 
     def placeOrder(self, order):
+        order.timestamp = time.time()
         self.__orders.append(order)
         self.broker.placeOrder(order)
 
