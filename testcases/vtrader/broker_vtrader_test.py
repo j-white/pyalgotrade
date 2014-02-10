@@ -44,7 +44,7 @@ class BacktestBrokerFactory(common.BrokerFactory):
         backtest = backtesting.Broker(cash, barFeed, commission=commission)
 
         # Create a new site instance
-        site = VtraderBrokerSite(self.PortfolioName, backtest)
+        site = VtraderBrokerSite(self.PortfolioUsername, self.PortfolioPassword, self.PortfolioName, backtest)
 
         # Add the new site
         self.port = reactor.listenTCP(0, site)

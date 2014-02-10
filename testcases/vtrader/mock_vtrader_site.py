@@ -28,12 +28,23 @@ from jinja2 import Environment
 import time
 import datetime
 
+def authenticated():
+    def wrap(f):
+        def wrapped_f(self, request):
+            authCookie = request.getCookie("_auth")
+            if authCookie is None:
+                msg = "Client not authenticated"
+                request.setResponseCode(403, msg)
+                return msg
+            return f(self, request)
+        return wrapped_f
+    return wrap
+
 class JSONResource(resource.Resource):
     isLeaf = True
 
-    def __init__(self, check_auth_cookie=True):
+    def __init__(self):
         resource.Resource.__init__(self)
-        self.check_auth_cookie = check_auth_cookie
         self.j2env = Environment()
         self.j2env.filters['format_currency'] = self.format_currency
 
@@ -47,24 +58,16 @@ class JSONResource(resource.Resource):
         return resource.Resource.getChild(self, name, request)
 
     def render_GET(self, request):
-        self.check_auth(request)
         request.setHeader("content-type", "application/json")
 
     def render_POST(self, request):
-        self.check_auth(request)
         request.setHeader("content-type", "application/json")
-
-    def check_auth(self, request):
-        if self.check_auth_cookie:
-            pass
 
 class HTMLResource(JSONResource):
     def render_GET(self, request):
-        self.check_auth(request)
         request.setHeader("content-type", "text/html")
 
     def render_POST(self, request):
-        self.check_auth(request)
         request.setHeader("content-type", "text/html")
 
 class PathResource(resource.Resource):
@@ -74,6 +77,25 @@ class PathResource(resource.Resource):
         if name == '':
             return self
         return resource.Resource.getChild(self, name, request)
+
+class Authentication(HTMLResource):
+    def __init__(self, site):
+        HTMLResource.__init__(self)
+        self.site = site
+
+    def render_POST(self, request):
+        HTMLResource.render_GET(self, request)
+
+        username = request.args['Login.UserName'][0]
+        password = request.args['Login.Password'][0]
+        remember = bool(request.args['Login.RememberMe'][0])
+
+        if username == self.site.username and password == self.site.password:
+            request.addCookie('_auth', '%s:%s:%s' % (username, password, remember))
+        else:
+             request.setResponseCode(403)
+
+        return ""
 
 class PortfolioPositions(JSONResource):
     JSON = """ {
@@ -98,6 +120,7 @@ class PortfolioPositions(JSONResource):
         JSONResource.__init__(self)
         self.site = site
 
+    @authenticated()
     def render_POST(self, request):
         JSONResource.render_GET(self, request)
         response = self.j2env.from_string(self.JSON).render(portfolio_id=self.site.portfolio_id, broker=self.site.broker)
@@ -122,6 +145,7 @@ class PortfolioDashboard(HTMLResource):
         HTMLResource.__init__(self)
         self.site = site
 
+    @authenticated()
     def render_GET(self, request):
         HTMLResource.render_GET(self, request)
         portfolios = {self.site.portfolio_name : self.site.portfolio_id}
@@ -169,6 +193,7 @@ class DashboardAccountBalance(JSONResource):
         JSONResource.__init__(self)
         self.site = site
 
+    @authenticated()
     def render_POST(self, request):
         portfolio_id = request.args['portfolioId'][0]
         if portfolio_id.lower() != self.site.portfolio_id.lower():
@@ -223,6 +248,7 @@ class PortfolioOrdersAndTransactions(JSONResource):
         JSONResource.__init__(self)
         self.site = site
 
+    @authenticated()
     def render_POST(self, request):
         portfolio_id = request.args['portfolioId'][0]
         if portfolio_id.lower() != self.site.portfolio_id.lower():
@@ -246,6 +272,7 @@ class OrderCreate(resource.Resource):
         resource.Resource.__init__(self)
         self.site = site
 
+    @authenticated()
     def render_POST(self, request):
         instrument = request.args['OrderLegs[0].DisplaySymbol'][0]
         duration = request.args['Duration'][0]
@@ -295,7 +322,9 @@ class OrderCreate(resource.Resource):
         return "Your order has been submitted"
 
 class VtraderBrokerSite(server.Site):
-    def __init__(self, portfolio, broker):
+    def __init__(self, username, password, portfolio, broker):
+        self.username = username
+        self.password = password
         self.portfolio_name = portfolio
         self.portfolio_id = str(uuid.uuid1())
         self.broker = broker
@@ -317,6 +346,10 @@ class VtraderBrokerSite(server.Site):
     def getRoot(self):
         # /
         root = PathResource()
+
+        # /Authentication
+        authentication = Authentication(self)
+        root.putChild('Authentication', authentication)
 
         # /VirtualTrader
         virtualtrader = PathResource()

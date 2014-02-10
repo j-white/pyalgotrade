@@ -435,7 +435,7 @@ class VtraderClient():
             'Login.Password': self.password,
             'Login.RememberMe': False,
             })
-        self.__get_response_data(url, data)
+        self.__get_response_data(url, data, auto_auth=False)
         self.cj.save(ignore_discard=True)
 
     def __get_opener(self, set_referer=True, is_ajax=False):
@@ -452,7 +452,7 @@ class VtraderClient():
 
         return opener
 
-    def __get_response_data(self, url, data=None, is_json=False, cached=False):
+    def __get_response_data(self, url, data=None, is_json=False, cached=False, auto_auth=True):
         response = None
         key = None
         if cached:
@@ -468,9 +468,10 @@ class VtraderClient():
         if not response:
             logger.debug("HTTP request to %s with: %s" % (url, data))
 
-            retries = 0
-            while retries >= 0:
-                retries -= 1
+
+            retry = True
+            while retry:
+                retry = False
 
                 try:
                     opener = self.__get_opener(is_ajax=is_json)
@@ -480,16 +481,16 @@ class VtraderClient():
                     opener.close()
                 except urllib2.HTTPError, e:
                     # If we're forbidden, authenticate, and retry
-                    if e.code == 403:
+                    if auto_auth and e.code == 403:
                         self._authenticate()
-                        retries += 1
+                        retry = True
                     else:
                         raise
 
-                try:
-                    logger.debug("HTTP response from %s: %s" % (url, response))
-                except UnicodeDecodeError:
-                    logger.debug("HTTP response from %s: (Failed to decode response)" % url)
+            try:
+                logger.debug("HTTP response from %s: %s" % (url, response))
+            except UnicodeDecodeError:
+                logger.debug("HTTP response from %s: (Failed to decode response)" % url)
 
             if cached:
                 self.cache[key] = response
