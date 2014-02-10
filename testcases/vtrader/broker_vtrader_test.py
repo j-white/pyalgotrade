@@ -1,12 +1,31 @@
-__author__ = 'jwhite'
+# PyAlgoTrade
+#
+# Copyright 2011-2013 Gabriel Martin Becedillas Ruiz
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import testcases.broker_common as common
-from twisted.internet import reactor
-from twisted.internet.error import ReactorAlreadyRunning
-from mock_vtrader_server import VtraderBrokerSite
+"""
+.. moduleauthor:: Jesse White <jwhite08@gmail.com>
+"""
+
 from pyalgotrade.broker import backtesting
 from pyalgotrade.vtrader import VtraderBroker
+import testcases.broker_common as common
+
 from threading import Thread
+from twisted.internet import reactor
+from twisted.internet.error import ReactorAlreadyRunning
+from mock_vtrader_site import VtraderBrokerSite
 
 def tearDownModule():
     reactor.callFromThread(reactor.stop)
@@ -60,50 +79,6 @@ class VtraderBrokerTestCase:
     Factory = BacktestBrokerFactory()
     Visitor = BacktestBrokerVisitor()
 
-
-from pyalgotrade import broker
-from pyalgotrade import bar
-from pyalgotrade import barfeed
-from pyalgotrade.broker import backtesting
-
-class MyTestCase(VtraderBrokerTestCase, common.BaseTestCase):
-    def testBuy_GTC(self):
-        brk = self.Factory.getBroker(10, barFeed=barfeed.BaseBarFeed(bar.Frequency.MINUTE))
-        barsBuilder = common.BarsBuilder(common.BaseTestCase.TestInstrument, bar.Frequency.MINUTE)
-
-        order = brk.createLimitOrder(broker.Order.Action.BUY, common.BaseTestCase.TestInstrument, 4, 2)
-        order.setGoodTillCanceled(True)
-        self.assertEqual(order.getFilled(), 0)
-        self.assertEqual(order.getRemaining(), 2)
-
-        # Fail to buy (couldn't get specific price).
-        cb = common.Callback()
-        brk.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
-        brk.placeOrder(order)
-        # Set sessionClose to true test that the order doesn't get canceled.
-        self.Visitor.onBars(brk, *barsBuilder.nextTuple(10, 15, 8, 12, sessionClose=True))
-        self.assertEqual(order.getFilled(), 0)
-        self.assertEqual(order.getRemaining(), 2)
-        self.assertTrue(order.isAccepted())
-        self.assertEqual(order.getExecutionInfo(), None)
-        self.assertEqual(len(brk.getActiveOrders()), 1)
-        self.assertEqual(brk.getCash(), 10)
-        self.assertEqual(brk.getShares(common.BaseTestCase.TestInstrument), 0)
-        self.assertEqual(cb.eventCount, 1)
-
-        # Buy
-        cb = common.Callback()
-        brk.getOrderUpdatedEvent().subscribe(cb.onOrderUpdated)
-        self.Visitor.onBars(brk, *barsBuilder.nextTuple(2, 15, 1, 12))
-        self.assertEqual(order.getFilled(), 2)
-        self.assertEqual(order.getRemaining(), 0)
-        self.assertTrue(order.isFilled())
-        self.assertEqual(order.getExecutionInfo().getPrice(), 2)
-        self.assertEqual(len(brk.getActiveOrders()), 0)
-        self.assertEqual(brk.getCash(), 6)
-        self.assertEqual(brk.getShares(common.BaseTestCase.TestInstrument), 2)
-        self.assertEqual(cb.eventCount, 1)
-
 class BrokerTestCase(VtraderBrokerTestCase, common.BrokerTestCase):
     pass
 
@@ -114,7 +89,4 @@ class LimitOrderTestCase(VtraderBrokerTestCase, common.LimitOrderTestCase):
     pass
 
 class StopOrderTestCase(VtraderBrokerTestCase, common.StopOrderTestCase):
-    pass
-
-class StopLimitOrderTestCase(VtraderBrokerTestCase, common.StopLimitOrderTestCase):
     pass

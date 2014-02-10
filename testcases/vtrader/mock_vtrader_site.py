@@ -1,6 +1,3 @@
-__author__ = 'jwhite'
-
-import unittest
 # PyAlgoTrade
 #
 # Copyright 2011-2013 Gabriel Martin Becedillas Ruiz
@@ -21,14 +18,10 @@ import unittest
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 
-from pyalgotrade.vtrader import VtraderBroker, VtraderClient
+from pyalgotrade.vtrader import VtraderClient
 from pyalgotrade import broker
-from pyalgotrade.broker import backtesting
 
 from twisted.web import server, resource
-from twisted.internet import reactor
-from twisted.internet.error import ReactorAlreadyRunning
-from threading import Thread
 import uuid
 from jinja2 import Environment
 
@@ -64,6 +57,15 @@ class JSONResource(resource.Resource):
     def check_auth(self, request):
         if self.check_auth_cookie:
             pass
+
+class HTMLResource(JSONResource):
+    def render_GET(self, request):
+        self.check_auth(request)
+        request.setHeader("content-type", "text/html")
+
+    def render_POST(self, request):
+        self.check_auth(request)
+        request.setHeader("content-type", "text/html")
 
 class PathResource(resource.Resource):
     isLeaf=False
@@ -101,34 +103,29 @@ class PortfolioPositions(JSONResource):
         response = self.j2env.from_string(self.JSON).render(portfolio_id=self.site.portfolio_id, broker=self.site.broker)
         return str(response)
 
-class PortfolioStrategyPositions(JSONResource):
-    JSON = """ {
-                    "data": [
-                        {%- for key, value in portfolios.iteritems() %}
-                        {%- if not loop.first -%},{%- endif -%}
-                            {
-                                "StrategyType": 0,
-                                "Groups": null,
-                                "Details": [
-                                    {
-                                        "PortfolioId": "{{ value }}",
-                                        "PortfolioName": "{{ key }}"
-                                    }
-                                ]
-                            }
-                        {% endfor %}
-                    ],
-                    "total": {{ portfolios.keys()|length }}
-                }"""
+class PortfolioDashboard(HTMLResource):
+    HTML = """
+    <div>
+     <ul>
+      {%- for pname, pid in portfolios.iteritems() %}
+      {%- if loop.first -%}
+      <li class="t-item t-state-default t-state-active" pid="{{ pid }}"><a class="t-link" href="#PortfoliosTabStrip-1">{{ pname }}</a></li>
+      {%- else -%}
+      <li class="t-item t-state-default" pid="{{ pid }}"><a class="t-link" href="/VirtualTrader/Portfolio/PortfolioDashboard/{{ pid }}">{{ pname }}</a></li>
+      {%- endif -%}
+      {% endfor %}
+     </ul>
+    </div>
+    """
 
     def __init__(self, site):
-        JSONResource.__init__(self)
+        HTMLResource.__init__(self)
         self.site = site
 
     def render_GET(self, request):
-        JSONResource.render_GET(self, request)
+        HTMLResource.render_GET(self, request)
         portfolios = {self.site.portfolio_name : self.site.portfolio_id}
-        response = self.j2env.from_string(self.JSON).render(portfolios=portfolios)
+        response = self.j2env.from_string(self.HTML).render(portfolios=portfolios)
         return str(response)
 
 class DashboardAccountBalance(JSONResource):
@@ -303,13 +300,10 @@ class VtraderBrokerSite(server.Site):
         self.portfolio_id = str(uuid.uuid1())
         self.broker = broker
 
-        # Register callbacks
-        self.broker.getOrderUpdatedEvent().subscribe(self.onOrderUpdated)
-
-        # Used to keep track of the orders state
+        # Used to keep track of all orders that have been placed (active or not)
         self.__orders = []
 
-        self.root = self.get_root()
+        self.root = self.getRoot()
         server.Site.__init__(self, self.root)
 
     def placeOrder(self, order):
@@ -320,7 +314,7 @@ class VtraderBrokerSite(server.Site):
     def getOrders(self):
         return self.__orders
 
-    def get_root(self):
+    def getRoot(self):
         # /
         root = PathResource()
 
@@ -332,13 +326,13 @@ class VtraderBrokerSite(server.Site):
         portfolio = PathResource()
         virtualtrader.putChild('Portfolio', portfolio)
 
-        # /VirtualTrader/Portfolio/PortfolioStrategyPositions_AjaxGrid
+        # /VirtualTrader/Portfolio/Dashboard
+        portfolio_dashboard = PortfolioDashboard(self)
+        portfolio.putChild('Dashboard', portfolio_dashboard)
+
+        # /VirtualTrader/Portfolio/PortfolioPositions_AjaxGrid
         portfolio_positions = PortfolioPositions(self)
         portfolio.putChild('PortfolioPositions_AjaxGrid', portfolio_positions)
-
-        # /VirtualTrader/Portfolio/PortfolioStrategyPositions_AjaxGrid
-        portfolio_strategy_positions = PortfolioStrategyPositions(self)
-        portfolio.putChild('PortfolioStrategyPositions_AjaxGrid', portfolio_strategy_positions)
 
         # /VirtualTrader/AccountBalance
         account_balance = PathResource()
@@ -361,6 +355,3 @@ class VtraderBrokerSite(server.Site):
         order.putChild('PortfolioOrdersAndTransactions_AjaxGrid', portfolio_orders_and_transactions)
 
         return root
-
-    def onOrderUpdated(self, broker_, order):
-        pass

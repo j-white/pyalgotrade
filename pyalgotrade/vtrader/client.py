@@ -102,17 +102,33 @@ class VtraderClient():
         return os.path.join(self.home, "vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
 
     def _get_portfolio_id(self):
-        url = "%s/VirtualTrader/Portfolio/PortfolioStrategyPositions_AjaxGrid" % self.base_url
-        response = self.__get_response_data(url, is_json=True, cached=True)
+        portfolios = self.get_portfolios()
 
-        for data in response['data']:
-            for details in data['Details']:
-                portfolio_name = details['PortfolioName']
-                portfolio_id = details['PortfolioId']
-                if portfolio_name.lower() == self.portfolio_name.lower():
-                    return portfolio_id
+        if portfolios.has_key(self.portfolio_name):
+            return portfolios[self.portfolio_name]
+        else:
+            raise PortfolioNotFound()
 
-        raise PortfolioNotFound()
+    def get_portfolios(self):
+        portfolios = {}
+
+        # Make a request to /VirtualTrader/Portfolio/Dashboard
+        url = "%s/VirtualTrader/Portfolio/Dashboard" % self.base_url
+        response = self.__get_response_data(url, cached=True)
+
+        # The current (default) portofolio name and id will be given by a link of this form
+        # 'pid="381da009-6dc2-4f2f-b302-8591d821decb"><a class="t-link" href="#PortfoliosTabStrip-1">Quant</a>'
+        match = re.search('pid="([0-9a-f-]+?)"><a class="t-link" href="#PortfoliosTabStrip-1">(.*?)</a>', response)
+        if match:
+            portfolios[match.group(2)] = match.group(1)
+
+        # Any others will be given by links of this form
+        # 'href="/VirtualTrader/Portfolio/PortfolioDashboard/381da009-6dc2-4f2f-b302-8591d821decb">Quant</a>'
+        matches = re.findall('href="/VirtualTrader/Portfolio/PortfolioDashboard/([0-9a-f-]+?)">(.*?)</a>', response)
+        for match in matches:
+            portfolios[match[1]] = match[0]
+
+        return portfolios
 
     def get_cash_value(self):
         account_balance = self._get_account_balance()
