@@ -42,6 +42,8 @@ class PortfolioNotFound(Exception):
     pass
 
 class VtraderClient():
+    """An HTTP-based client that interfaces with the Vtrader platform"""
+
     home = os.path.join(os.path.expanduser("~"), "pyalgotrader")
     cache_expiry_in_seconds = 30
 
@@ -54,12 +56,12 @@ class VtraderClient():
         SELL_OPTION             = 5
         SELL_OPTION_TO_CLOSE    = 6
 
-    class InstrumentType(object):
+    class InstrumentType:
         STOCK = 1
         CALL_OPTION = 2
         PUT_OPTION = 3
 
-     # Maps the order type to the proper Vtrader order type.
+     # Maps the pyalgotrader order types to the Vtrader order types
     ALGO_TO_VTRADER_ORDER_TYPE =  {
         broker.Order.Type.MARKET : 'Market',
         broker.Order.Type.LIMIT : 'Limit',
@@ -67,6 +69,7 @@ class VtraderClient():
         broker.Order.Type.STOP : 'Stop'
     }
 
+    # Maps the Vtrader order types to the pyalgotrader order types
     VTRADER_TO_ALGO_ORDER_TYPE = {v:k for k, v in ALGO_TO_VTRADER_ORDER_TYPE.items()}
 
     def __init__(self, portfolio, username, password, url):
@@ -89,32 +92,20 @@ class VtraderClient():
         # Setup the cache
         self.cache = GenericCache(expiry=self.cache_expiry_in_seconds)
 
-        # Dynamically determine the portfolio id from the portfolio name
+        # Determine the portfolio id from the portfolio name
         self.portfolio_name = portfolio
         self.portfolio_id = self._get_portfolio_id()
 
-    def _get_cookie_file(self):
-        """Returns the filename used to store the cookies which is unique for every username/url pair."""
+    def getPortfolios(self):
+        """Retrieves the available portfolio names and corresponding ids from the server.
 
-        # Hash the URL instead of storing the path
-        m = hashlib.md5()
-        m.update(self.base_url)
-        return os.path.join(self.home, "vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
-
-    def _get_portfolio_id(self):
-        portfolios = self.get_portfolios()
-
-        if portfolios.has_key(self.portfolio_name):
-            return portfolios[self.portfolio_name]
-        else:
-            raise PortfolioNotFound()
-
-    def get_portfolios(self):
+        :rtype: A dictionary mapping the portfolio names to their ids
+        """
         portfolios = {}
 
         # Make a request to /VirtualTrader/Portfolio/Dashboard
         url = "%s/VirtualTrader/Portfolio/Dashboard" % self.base_url
-        response = self.__get_response_data(url, cached=True)
+        response = self._get_response_data(url, cached=True)
 
         # The current (default) portofolio name and id will be given by a link of this form
         # 'pid="381da009-6dc2-4f2f-b302-8591d821decb"><a class="t-link" href="#PortfoliosTabStrip-1">Quant</a>'
@@ -198,7 +189,7 @@ class VtraderClient():
             'PortfolioId': self.portfolio_id,
             'OrderType': self.ALGO_TO_VTRADER_ORDER_TYPE[order.getType()],
             'Status': '',
-            'KeySymbol': self.__get_key(order.getInstrument()),
+            'KeySymbol': self._get_key(order.getInstrument()),
             'IsFutureTrade': False,
             'IsIndexOrCurrencyOptionTrade': False,
             'X-Requested-With': 'XMLHttpRequest',
@@ -207,7 +198,7 @@ class VtraderClient():
         # We should repeat this for every leg in the spread, but we're only dealing with simple orders
         leg_index = 0
         action = self._get_order_action(order)
-        instrument_type = self.__get_instrument_type(order.getInstrument())
+        instrument_type = self._get_instrument_type(order.getInstrument())
         if instrument_type == self.InstrumentType.STOCK:
             data.update(self.__get_stock_leg(leg_index, action, order))
         else:
@@ -215,7 +206,7 @@ class VtraderClient():
             #data.update(self.__get_option_leg(leg_index, order))
 
         data = urllib.urlencode(data)
-        response = self.__get_response_data(url, data)
+        response = self._get_response_data(url, data)
         if not 'Your order has been submitted' in response:
             raise OrderFailed("Received invalid response: %s" % response)
 
@@ -242,7 +233,7 @@ class VtraderClient():
             self.InstrumentType.PUT_OPTION : optionOrderActionMap,
         }
 
-        instrument_type = self.__get_instrument_type(order.getInstrument())
+        instrument_type = self._get_instrument_type(order.getInstrument())
         return orderActionMap[instrument_type][order.getAction()]
 
     def __get_stock_leg(self, id, action, order):
@@ -250,10 +241,10 @@ class VtraderClient():
             'Action': action,
             'Quantity': order.getQuantity(),
             'DisplaySymbol': order.getInstrument(),
-            'KeySymbol': self.__get_key(order.getInstrument()),
+            'KeySymbol': self._get_key(order.getInstrument()),
             'Exchange': 'TSX',
             'UnderlyingSymbol': order.getInstrument(),
-            'UnderlyingKeySymbol': self.__get_key(order.getInstrument()),
+            'UnderlyingKeySymbol': self._get_key(order.getInstrument()),
             'UnderlyingExchange': 'TSX',
             'AssetType': 'Stock',
             'CFICode': 'ESXXXX',
@@ -329,16 +320,32 @@ class VtraderClient():
         open_orders = self._get_open_orders()
         return int(open_orders['total'])
 
+    def _get_cookie_file(self):
+        """Returns the filename used to store the cookies which is unique for every username/url pair."""
+
+        # Hash the URL instead of storing the path
+        m = hashlib.md5()
+        m.update(self.base_url)
+        return os.path.join(self.home, "vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
+
+    def _get_portfolio_id(self):
+        portfolios = self.getPortfolios()
+
+        if portfolios.has_key(self.portfolio_name):
+            return portfolios[self.portfolio_name]
+        else:
+            raise PortfolioNotFound()
+
     def _get_summary(self):
         url = "%s/VirtualTrader/Portfolio/GetSummary" % self.base_url
-        return self.__get_response_data(url, is_json=True)
+        return self._get_response_data(url, is_json=True)
 
     def _get_account_balance(self):
         url = "%s/VirtualTrader/AccountBalance/GetDashboardAccountBalance" % (self.base_url)
         data = urllib.urlencode({
             'portfolioId': self.portfolio_id,
             })
-        return  self.__get_response_data(url, data, is_json=True)
+        return  self._get_response_data(url, data, is_json=True)
 
     def _get_portfolio_quotes(self):
         url = "%s/VirtualTrader/Portfolio/PortfolioQuotes_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
@@ -346,7 +353,7 @@ class VtraderClient():
             'page': 1,
             'orderBy': 'Change-desc',
             })
-        return self.__get_response_data(url, data, is_json=True)
+        return self._get_response_data(url, data, is_json=True)
 
     def _get_portfolio_positions(self):
         url = "%s/VirtualTrader/Portfolio/PortfolioPositions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
@@ -354,14 +361,14 @@ class VtraderClient():
             'page': 1,
             'orderBy': 'PortfolioMarketValuePerc-desc',
             })
-        return self.__get_response_data(url, data, is_json=True)
+        return self._get_response_data(url, data, is_json=True)
 
     def _get_portfolio_transaction_history(self):
         url = "%s/VirtualTrader/Order/PortfolioTransactionHistory_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
         data = urllib.urlencode({
             'portfolioId': self.portfolio_id,
             })
-        return self.__get_response_data(url, data, is_json=True)
+        return self._get_response_data(url, data, is_json=True)
 
     def _get_portfolio_orders_and_transactions(self, nbOrdersShow=5):
         url = "%s/VirtualTrader/Order/PortfolioOrdersAndTransactions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
@@ -369,7 +376,7 @@ class VtraderClient():
             'portfolioId': self.portfolio_id,
             'nbOrdersShow': nbOrdersShow,
             })
-        return self.__get_response_data(url, data, is_json=True)
+        return self._get_response_data(url, data, is_json=True)
 
     def _get_available_stocks(self):
         stocks = {}
@@ -379,7 +386,7 @@ class VtraderClient():
 
         for term in terms:
             url = "%s/VirtualTrader/Search/Stock?term=%s" % (self.base_url, term)
-            list_of_stocks = self.__get_response_data(url, is_json=True,  cached=True)
+            list_of_stocks = self._get_response_data(url, is_json=True,  cached=True)
             for entry in list_of_stocks:
                 stocks[entry['Symbol']] = entry
 
@@ -391,7 +398,7 @@ class VtraderClient():
             'page': 1,
             'size': 100,
             })
-        return self.__get_response_data(url, data, is_json=True)
+        return self._get_response_data(url, data, is_json=True)
 
     def _cancel_order(self, order_id):
         url = self.base_url + "/VirtualTrader/VirtualTrader/Order/CancelOrder"
@@ -399,9 +406,9 @@ class VtraderClient():
             'orderId': order_id,
             'portfolioId': self.portfolio_id,
             })
-        return self.__get_response_data(url, data, is_json=True)
+        return self._get_response_data(url, data, is_json=True)
 
-    def __get_instrument_type(self, instrument):
+    def _get_instrument_type(self, instrument):
         """Returns the type of instrument. Valid instrument types are:
 
          * InstrumentType.STOCK
@@ -410,8 +417,8 @@ class VtraderClient():
         """
         return VtraderClient.InstrumentType.STOCK
 
-    def __get_key(self, instrument):
-        type = self.__get_instrument_type(instrument)
+    def _get_key(self, instrument):
+        type = self._get_instrument_type(instrument)
 
         if type == VtraderClient.InstrumentType.STOCK:
             return 'ca;%s' % instrument
@@ -435,10 +442,10 @@ class VtraderClient():
             'Login.Password': self.password,
             'Login.RememberMe': False,
             })
-        self.__get_response_data(url, data, auto_auth=False)
+        self._get_response_data(url, data, auto_auth=False)
         self.cj.save(ignore_discard=True)
 
-    def __get_opener(self, set_referer=True, is_ajax=False):
+    def _get_opener(self, set_referer=True, is_ajax=False):
         opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cj))
 
         headers = [
@@ -452,7 +459,7 @@ class VtraderClient():
 
         return opener
 
-    def __get_response_data(self, url, data=None, is_json=False, cached=False, auto_auth=True):
+    def _get_response_data(self, url, data=None, is_json=False, cached=False, auto_auth=True):
         response = None
         key = None
         if cached:
@@ -468,13 +475,12 @@ class VtraderClient():
         if not response:
             logger.debug("HTTP request to %s with: %s" % (url, data))
 
-
             retry = True
             while retry:
                 retry = False
 
                 try:
-                    opener = self.__get_opener(is_ajax=is_json)
+                    opener = self._get_opener(is_ajax=is_json)
                     result = opener.open(url, data=data)
                     response = result.read()
                     result.close()
