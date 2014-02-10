@@ -26,12 +26,11 @@ import json
 import string
 import os
 import re
+import time
 from datetime import datetime
 
 from pyalgotrade import broker
 import pyalgotrade.logger
-
-from GenericCache.GenericCache import GenericCache
 
 logger = pyalgotrade.logger.getLogger("vtrader.client")
 
@@ -41,13 +40,55 @@ class OrderFailed(Exception):
 class PortfolioNotFound(Exception):
     pass
 
-class VtraderClient():
+class Memoize(object):
+    def __init__(self, expiry=None):
+        self.expiry = expiry
+        self.nodes = {}
+
+    class Node(object):
+        def __init__(self, key, value):
+            self.key = key
+            self.value = value
+            self.timestamp = time.time()
+
+        def is_expired(self, expiry):
+            return expiry and self.timestamp + expiry < time.time()
+
+        def __str__(self):
+            return str(self.key)
+
+        def __hash__(self):
+            return hash(str(self))
+
+        def __cmp__(self, other):
+            return cmp(str(self), str(other))
+
+    def __call__(self, f):
+        def wrapped_f(*args, **kwargs):
+            # Convert the arguments to a string and skip the 1st arg 'self'
+            key = '%s - %s' % (args[1:], kwargs)
+
+            # Pull the node from the cache
+            node = self.nodes.get(key, None)
+
+            # Evaluate the function if the node is missing or expired
+            if node is None or node.is_expired(self.expiry):
+                value = f(*args, **kwargs)
+
+                # Save the value to the cache
+                node = Memoize.Node(key, value)
+                self.nodes[key] = node
+
+            return node.value
+        return wrapped_f
+
+class VtraderClient(object):
     """An HTTP-based client that interfaces with the Vtrader platform"""
 
     home = os.path.join(os.path.expanduser("~"), "pyalgotrader")
     cache_expiry_in_seconds = 30
 
-    class Action:
+    class Action(object):
         BUY_STOCK		        = 0
         SELL_STOCK              = 1
         SELL_STOCK_SHORT		= 2
@@ -56,7 +97,7 @@ class VtraderClient():
         SELL_OPTION             = 5
         SELL_OPTION_TO_CLOSE    = 6
 
-    class InstrumentType:
+    class InstrumentType(object):
         STOCK = 1
         CALL_OPTION = 2
         PUT_OPTION = 3
@@ -89,9 +130,6 @@ class VtraderClient():
         except IOError:
             pass
 
-        # Setup the cache
-        self.cache = GenericCache(expiry=self.cache_expiry_in_seconds)
-
         # Determine the portfolio id from the portfolio name
         self.portfolio_name = portfolio
         self.portfolio_id = self._get_portfolio_id()
@@ -105,7 +143,7 @@ class VtraderClient():
 
         # Make a request to /VirtualTrader/Portfolio/Dashboard
         url = "%s/VirtualTrader/Portfolio/Dashboard" % self.base_url
-        response = self._get_response_data(url, cached=True)
+        response = self._getCachedResponse(url)
 
         # The current (default) portofolio name and id will be given by a link of this form
         # 'pid="381da009-6dc2-4f2f-b302-8591d821decb"><a class="t-link" href="#PortfoliosTabStrip-1">Quant</a>'
@@ -206,7 +244,7 @@ class VtraderClient():
             #data.update(self.__get_option_leg(leg_index, order))
 
         data = urllib.urlencode(data)
-        response = self._get_response_data(url, data)
+        response = self._getResponse(url, data)
         if not 'Your order has been submitted' in response:
             raise OrderFailed("Received invalid response: %s" % response)
 
@@ -338,14 +376,14 @@ class VtraderClient():
 
     def _get_summary(self):
         url = "%s/VirtualTrader/Portfolio/GetSummary" % self.base_url
-        return self._get_response_data(url, is_json=True)
+        return self._getResponse(url, isJson=True)
 
     def _get_account_balance(self):
         url = "%s/VirtualTrader/AccountBalance/GetDashboardAccountBalance" % (self.base_url)
         data = urllib.urlencode({
             'portfolioId': self.portfolio_id,
             })
-        return  self._get_response_data(url, data, is_json=True)
+        return  self._getResponse(url, data, isJson=True)
 
     def _get_portfolio_quotes(self):
         url = "%s/VirtualTrader/Portfolio/PortfolioQuotes_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
@@ -353,7 +391,7 @@ class VtraderClient():
             'page': 1,
             'orderBy': 'Change-desc',
             })
-        return self._get_response_data(url, data, is_json=True)
+        return self._getResponse(url, data, isJson=True)
 
     def _get_portfolio_positions(self):
         url = "%s/VirtualTrader/Portfolio/PortfolioPositions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
@@ -361,14 +399,14 @@ class VtraderClient():
             'page': 1,
             'orderBy': 'PortfolioMarketValuePerc-desc',
             })
-        return self._get_response_data(url, data, is_json=True)
+        return self._getResponse(url, data, isJson=True)
 
     def _get_portfolio_transaction_history(self):
         url = "%s/VirtualTrader/Order/PortfolioTransactionHistory_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
         data = urllib.urlencode({
             'portfolioId': self.portfolio_id,
             })
-        return self._get_response_data(url, data, is_json=True)
+        return self._getResponse(url, data, isJson=True)
 
     def _get_portfolio_orders_and_transactions(self, nbOrdersShow=5):
         url = "%s/VirtualTrader/Order/PortfolioOrdersAndTransactions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
@@ -376,7 +414,7 @@ class VtraderClient():
             'portfolioId': self.portfolio_id,
             'nbOrdersShow': nbOrdersShow,
             })
-        return self._get_response_data(url, data, is_json=True)
+        return self._getResponse(url, data, isJson=True)
 
     def _get_available_stocks(self):
         stocks = {}
@@ -386,7 +424,7 @@ class VtraderClient():
 
         for term in terms:
             url = "%s/VirtualTrader/Search/Stock?term=%s" % (self.base_url, term)
-            list_of_stocks = self._get_response_data(url, is_json=True,  cached=True)
+            list_of_stocks = self._getCachedResponse(url, isJson=True)
             for entry in list_of_stocks:
                 stocks[entry['Symbol']] = entry
 
@@ -398,7 +436,7 @@ class VtraderClient():
             'page': 1,
             'size': 100,
             })
-        return self._get_response_data(url, data, is_json=True)
+        return self._getResponse(url, data, isJson=True)
 
     def _cancel_order(self, order_id):
         url = self.base_url + "/VirtualTrader/VirtualTrader/Order/CancelOrder"
@@ -406,7 +444,7 @@ class VtraderClient():
             'orderId': order_id,
             'portfolioId': self.portfolio_id,
             })
-        return self._get_response_data(url, data, is_json=True)
+        return self._getResponse(url, data, isJson=True)
 
     def _get_instrument_type(self, instrument):
         """Returns the type of instrument. Valid instrument types are:
@@ -442,7 +480,7 @@ class VtraderClient():
             'Login.Password': self.password,
             'Login.RememberMe': False,
             })
-        self._get_response_data(url, data, auto_auth=False)
+        self._getResponse(url, data, autoAuth=False)
         self.cj.save(ignore_discard=True)
 
     def _get_opener(self, set_referer=True, is_ajax=False):
@@ -459,48 +497,37 @@ class VtraderClient():
 
         return opener
 
-    def _get_response_data(self, url, data=None, is_json=False, cached=False, auto_auth=True):
+    @Memoize(expiry=cache_expiry_in_seconds)
+    def _getCachedResponse(self, *args, **kwargs):
+        return self._getResponse(*args, **kwargs)
+
+    def _getResponse(self, url, data=None, isJson=False, autoAuth=True):
+        logger.debug("HTTP request to %s with: %s" % (url, data))
+
         response = None
-        key = None
-        if cached:
-            # Hash the URL and data
-            m = hashlib.sha256()
-            m.update(url)
-            m.update(str(data))
-
-            # Cache lookup
-            key = "vtrader-%s" % m.hexdigest()
-            response = self.cache[key]
-
-        if not response:
-            logger.debug("HTTP request to %s with: %s" % (url, data))
-
-            retry = True
-            while retry:
-                retry = False
-
-                try:
-                    opener = self._get_opener(is_ajax=is_json)
-                    result = opener.open(url, data=data)
-                    response = result.read()
-                    result.close()
-                    opener.close()
-                except urllib2.HTTPError, e:
-                    # If we're forbidden, authenticate, and retry
-                    if auto_auth and e.code == 403:
-                        self._authenticate()
-                        retry = True
-                    else:
-                        raise
+        retry = True
+        while retry:
+            retry = False
 
             try:
-                logger.debug("HTTP response from %s: %s" % (url, response))
-            except UnicodeDecodeError:
-                logger.debug("HTTP response from %s: (Failed to decode response)" % url)
+                opener = self._get_opener(is_ajax=isJson)
+                result = opener.open(url, data=data)
+                response = result.read()
+                result.close()
+                opener.close()
+            except urllib2.HTTPError, e:
+                # If we're forbidden, authenticate, and retry
+                if autoAuth and e.code == 403:
+                    self._authenticate()
+                    retry = True
+                else:
+                    raise
 
-            if cached:
-                self.cache[key] = response
+        try:
+            logger.debug("HTTP response from %s: %s" % (url, response))
+        except UnicodeDecodeError:
+            logger.debug("HTTP response from %s: (Failed to decode response)" % url)
 
-        if is_json:
+        if isJson:
             return json.loads(response)
         return response
