@@ -45,15 +45,16 @@ class VtraderBroker(broker.Broker):
     """A Vtrader broker."""
     COMMISSION_PER_TRADE = 9.95
 
-    def __init__(self, portfolio, username, password, url, commission=backtesting.FixedPerTrade(COMMISSION_PER_TRADE)):
+    def __init__(self, portfolio, username, password, url,
+                 client=None, commission=backtesting.FixedPerTrade(COMMISSION_PER_TRADE)):
         broker.Broker.__init__(self)
         self.__activeOrders = {}
-        self.client = VtraderClient(portfolio, username, password, url)
+        self.client = client if client is not None else VtraderClient(portfolio, username, password, url)
         self.commission = commission
 
     def getCash(self):
         """Returns the amount of available buying power in dollars."""
-        return self.client.get_cash_value()
+        return self.client.getCashValue()
 
     def getShares(self, instrument):
         """Returns the number of shares for an instrument."""
@@ -62,20 +63,12 @@ class VtraderBroker(broker.Broker):
 
     def getPositions(self):
         """Returns a dictionary that maps instruments to shares."""
-        return self.client.get_positions()
+        return self.client.getPositions()
 
     def placeOrder(self, order):
         if order.isInitial():
-            self.client.place_order(order)
-
-            # The Vtrader API does not return the order ID when the order is placed, it only
-            # returns a message confirming that the order was submitted. In order to
-            # retrieve the order id we need to make an additional call. We will assume that the
-            # id of the last order for the given instrument is the one we just opened
-            # IMPORTANT: This has some limitations in a multi-threaded or multi-client environment, but
-            # its the best we can do given the constraints of the API
-            order_id = self.client.get_last_orderid_for_instrument(order.getInstrument())
-            order.setId(order_id)
+            # Place the order and set the order's id
+            self.client.placeOrder(order)
             self.__activeOrders[order.getId()] = order
 
             # Switch from INITIAL -> SUBMITTED
@@ -98,7 +91,7 @@ class VtraderBroker(broker.Broker):
 
             if order.isAccepted():
                 # Update the order
-                self.client.update_order(order, commission=self.commission)
+                self.client.updateOrder(order, commission=self.commission)
 
                 if not order.isActive():
                     del self.__activeOrders[order.getId()]
@@ -126,4 +119,7 @@ class VtraderBroker(broker.Broker):
             raise Exception("The order is not active anymore")
         if activeOrder.isFilled():
             raise Exception("Can't cancel order that has already been filled")
+
+        self.client.cancelOrder(order)
+        del self.__activeOrders[order.getId()]
         activeOrder.switchState(broker.Order.State.CANCELED)

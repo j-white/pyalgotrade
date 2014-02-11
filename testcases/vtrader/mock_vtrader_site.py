@@ -156,24 +156,24 @@ class DashboardAccountBalance(JSONResource):
     JSON = """ {
                 "PortfolioId": "{{ portfolio_id }}",
                 "AccountValue": {
-                    "RawData": 197378.75,
-                    "FormattedData": "$197,378.75"
+                    "RawData": 0,
+                    "FormattedData": "$0.00"
                 },
                 "CurrentPositionValue": {
-                    "RawData": -11301.36,
-                    "FormattedData": "-$11,301.36"
+                    "RawData": 0,
+                    "FormattedData": "$0.00"
                 },
                 "MoneyMarketCashValue": {
                     "RawData": {{ '%.2f' | format(broker.getCash()) }},
                     "FormattedData": "{{ broker.getCash() }}"
                 },
                 "StockBuyingPower": {
-                    "RawData": 24510.77,
-                    "FormattedData": "$24,510.77"
+                    "RawData": 0,
+                    "FormattedData": "$0.00"
                 },
                 "OptionBuyingPower": {
-                    "RawData": 24510.77,
-                    "FormattedData": "$24,510.77"
+                    "RawData": 0,
+                    "FormattedData": "$0.00"
                 },
                 "TotalOutstandingOrdersValue": {
                     "RawData": 0,
@@ -199,7 +199,7 @@ class DashboardAccountBalance(JSONResource):
         if portfolio_id.lower() != self.site.portfolio_id.lower():
             raise Exception("Invalid portfolio id " + portfolio_id)
 
-        JSONResource.render_GET(self, request)
+        JSONResource.render_POST(self, request)
         response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker)
         return str(response)
 
@@ -216,28 +216,16 @@ class PortfolioOrdersAndTransactions(JSONResource):
                             "IsOpenOrder": {{ order.isActive()|lower }},
                             "IsPartialOrder": {{ order.isPartiallyFilled()|lower }},
                             "IsAbortedOrder": {{ order.isCanceled()|lower }},
-                            "AbortedMessage": null,
-                            "IsStrategy": false,
                             "KeySymbol": "ca;{{ order.getInstrument() }}",
                             "Symbol": "{{ order.getInstrument()}}",
-                            "Exchange": "TSX",
-                            "UnderlyingSymbol": "",
-                            "UnderlyingExchange": "",
                             "Description": "{{ order.getInstrument() }}",
-                            "Last": "10.86",
-                            "Bid": "10.85",
-                            "Ask": "10.87",
-                            "OrderStatus": "Pending New",
-                            "OrderType": "Market",
-                            "Side": "Buy",
-                            "PositionEffect": "",
+                            "OrderType": "{{ order_to_type[order.getId()] }}",
                             "TotalQuantity": "{{ order.getQuantity() }}",
                             "CumulativeQuantity": "{{ execInfo.getQuantity() }}",
                             "CumulativeQuantityAveragePrice": "{{ execInfo.getPrice() / execInfo.getQuantity() }}",
                             "RemainingQuantity": "{{ order.getQuantity() - execInfo.getQuantity() }}",
                             "PriceLimit": null,
-                            "StopPrice": null,
-                            "TimeInForce": "Day"
+                            "StopPrice": null
                         }
                     {% endfor %}
                 ],
@@ -260,16 +248,21 @@ class PortfolioOrdersAndTransactions(JSONResource):
         last_n_orders = self.site.getOrders()[-number_of_orders_to_show:]
         blankExecutionInfo = broker.OrderExecutionInfo(0, 1, 0, datetime.datetime.now())
 
-        JSONResource.render_GET(self, request)
+        order_to_type = {}
+        for order in last_n_orders:
+            order_to_type[order.getId()] = VtraderClient.ALGO_TO_VTRADER_ORDER_TYPE[order.getType()]
+
+        JSONResource.render_POST(self, request)
         response = self.j2env.from_string(self.JSON).render(portfolio_id=portfolio_id, broker=self.site.broker,
-                                                            orders=last_n_orders, execInfo = blankExecutionInfo)
+                                                            orders=last_n_orders, order_to_type=order_to_type,
+                                                            execInfo = blankExecutionInfo)
         return str(response)
 
-class OrderCreate(resource.Resource):
+class OrderCreate(HTMLResource):
     isLeaf = True
 
     def __init__(self, site):
-        resource.Resource.__init__(self)
+        HTMLResource.__init__(self)
         self.site = site
 
     @authenticated()
@@ -319,7 +312,29 @@ class OrderCreate(resource.Resource):
             order.setGoodTillCanceled(True)
 
         self.site.placeOrder(order)
+
+        HTMLResource.render_POST(self, request)
         return "Your order has been submitted"
+
+class OrderCancel(JSONResource):
+    isLeaf = True
+
+    def __init__(self, site):
+        JSONResource.__init__(self)
+        self.site = site
+
+    @authenticated()
+    def render_POST(self, request):
+        order_id = request.args['orderId'][0]
+        portfolio_id = request.args['portfolioId'][0]
+
+        order = self.site.getOrder(order_id)
+        if order is None:
+            raise Exception("Order %s is not active" % order_id)
+
+        self.site.broker.cancelOrder(order)
+        JSONResource.render_POST(self, request)
+        return "{\"success\":true}"
 
 class VtraderBrokerSite(server.Site):
     def __init__(self, username, password, portfolio, broker):
@@ -339,6 +354,12 @@ class VtraderBrokerSite(server.Site):
         order.timestamp = time.time()
         self.__orders.append(order)
         self.broker.placeOrder(order)
+
+    def getOrder(self, order_id):
+        for order in self.__orders:
+            if str(order.getId()) == str(order_id):
+                return order
+        return None
 
     def getOrders(self):
         return self.__orders
@@ -382,6 +403,10 @@ class VtraderBrokerSite(server.Site):
         # /VirtualTrader/Order/Create
         order_create = OrderCreate(self)
         order.putChild('Create', order_create)
+
+        # /VirtualTrader/Order/CancelOrder
+        order_cancel = OrderCancel(self)
+        order.putChild('CancelOrder', order_cancel)
 
         # /VirtualTrader/Order/PortfolioOrdersAndTransactions_AjaxGrid
         portfolio_orders_and_transactions = PortfolioOrdersAndTransactions(self)

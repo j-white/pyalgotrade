@@ -19,7 +19,7 @@
 """
 
 from pyalgotrade.broker import backtesting
-from pyalgotrade.vtrader import VtraderBroker
+from pyalgotrade.vtrader import VtraderBroker, VtraderClient
 import testcases.broker_common as common
 
 from threading import Thread
@@ -53,8 +53,12 @@ class BacktestBrokerFactory(common.BrokerFactory):
         Thread(target=self.runReactor).start()
 
         # Create a broker pointing to the new site instance
-        vtrader = VtraderBroker(self.PortfolioName, self.PortfolioUsername, self.PortfolioPassword,
-                             "http://127.0.0.1:%d" % self.port.getHost().port, commission=commission)
+        url = "http://127.0.0.1:%d" % self.port.getHost().port
+        client = VtraderClient(self.PortfolioName, self.PortfolioUsername,
+                               self.PortfolioPassword, url,
+                               save_cookies_to_disk=False)
+        vtrader = VtraderBroker(self.PortfolioName, self.PortfolioUsername, self.PortfolioPassword, url,
+                                client=client, commission=commission)
 
         # Store the ref to the backtest
         vtrader.backtest = backtest

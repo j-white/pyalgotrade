@@ -34,13 +34,8 @@ import pyalgotrade.logger
 
 logger = pyalgotrade.logger.getLogger("vtrader.client")
 
-class OrderFailed(Exception):
-    pass
-
-class PortfolioNotFound(Exception):
-    pass
-
 class Memoize(object):
+    """ Used to cache HTTP responses. """
     def __init__(self, expiry=None):
         self.expiry = expiry
         self.nodes = {}
@@ -82,25 +77,19 @@ class Memoize(object):
             return node.value
         return wrapped_f
 
+class OrderFailed(Exception):
+    """ Thrown when an error occurs placing an order. """
+    pass
+
+class PortfolioNotFound(Exception):
+    """ Thrown when the id cannot be determined for the given portfolio name. """
+    pass
+
 class VtraderClient(object):
     """An HTTP-based client that interfaces with the Vtrader platform"""
 
-    home = os.path.join(os.path.expanduser("~"), "pyalgotrader")
-    cache_expiry_in_seconds = 30
-
-    class Action(object):
-        BUY_STOCK		        = 0
-        SELL_STOCK              = 1
-        SELL_STOCK_SHORT		= 2
-        BUY_OPTION              = 3
-        BUY_OPTION_TO_CLOSE     = 4
-        SELL_OPTION             = 5
-        SELL_OPTION_TO_CLOSE    = 6
-
-    class InstrumentType(object):
-        STOCK = 1
-        CALL_OPTION = 2
-        PUT_OPTION = 3
+    HOME = os.path.join(os.path.expanduser("~"), "pyalgotrader")
+    CACHE_EXPIRY_IN_SECONDS = 30
 
      # Maps the pyalgotrader order types to the Vtrader order types
     ALGO_TO_VTRADER_ORDER_TYPE =  {
@@ -113,15 +102,32 @@ class VtraderClient(object):
     # Maps the Vtrader order types to the pyalgotrader order types
     VTRADER_TO_ALGO_ORDER_TYPE = {v:k for k, v in ALGO_TO_VTRADER_ORDER_TYPE.items()}
 
-    def __init__(self, portfolio, username, password, url):
+    class Action(object):
+        """Vtrader action codes - these differ by instrument type"""
+        BUY_STOCK		        = 0
+        SELL_STOCK              = 1
+        SELL_STOCK_SHORT		= 2
+        BUY_OPTION              = 3
+        BUY_OPTION_TO_CLOSE     = 4
+        SELL_OPTION             = 5
+        SELL_OPTION_TO_CLOSE    = 6
+
+    class InstrumentType(object):
+        """Used locally to identify the different types of instruments"""
+        STOCK = 1
+        CALL_OPTION = 2
+        PUT_OPTION = 3
+
+    def __init__(self, portfolio, username, password, url, save_cookies_to_disk=False):
         self.base_url = url
         self.username = username
         self.password = password
-        self.cookie_file = self._get_cookie_file()
+        self.save_cookies_to_disk = save_cookies_to_disk
+        self.cookie_file = self._getCookieFile()
 
         # Create the working directory if not already present
-        if not os.path.exists(self.home):
-            os.makedirs(self.home)
+        if save_cookies_to_disk and not os.path.exists(self.HOME):
+            os.makedirs(self.HOME)
 
         # Fire up the cookie jar
         self.cj = cookielib.MozillaCookieJar(self.cookie_file)
@@ -132,7 +138,7 @@ class VtraderClient(object):
 
         # Determine the portfolio id from the portfolio name
         self.portfolio_name = portfolio
-        self.portfolio_id = self._get_portfolio_id()
+        self.portfolio_id = self._getPortfolioId()
 
     def getPortfolios(self):
         """Retrieves the available portfolio names and corresponding ids from the server.
@@ -146,172 +152,30 @@ class VtraderClient(object):
         response = self._getCachedResponse(url)
 
         # The current (default) portofolio name and id will be given by a link of this form
-        # 'pid="381da009-6dc2-4f2f-b302-8591d821decb"><a class="t-link" href="#PortfoliosTabStrip-1">Quant</a>'
+        # 'pid="381da009-6dc2-4f2f-b302-8582d821decc"><a class="t-link" href="#PortfoliosTabStrip-1">Default</a>'
         match = re.search('pid="([0-9a-f-]+?)"><a class="t-link" href="#PortfoliosTabStrip-1">(.*?)</a>', response)
         if match:
             portfolios[match.group(2)] = match.group(1)
 
         # Any others will be given by links of this form
-        # 'href="/VirtualTrader/Portfolio/PortfolioDashboard/381da009-6dc2-4f2f-b302-8591d821decb">Quant</a>'
+        # 'href="/VirtualTrader/Portfolio/PortfolioDashboard/381da009-6dc2-4f2a-b212-8591d821decb">Additional</a>'
         matches = re.findall('href="/VirtualTrader/Portfolio/PortfolioDashboard/([0-9a-f-]+?)">(.*?)</a>', response)
         for match in matches:
             portfolios[match[1]] = match[0]
 
         return portfolios
 
-    def get_cash_value(self):
-        account_balance = self._get_account_balance()
+    def getCashValue(self):
+        """Returns the amount of available buying power in dollars."""
+        account_balance = self._getAccountBalance()
         return float(account_balance['MoneyMarketCashValue']['RawData'])
 
-    def get_last_orderid_for_instrument(self, instrument):
-        orders = self._get_portfolio_orders_and_transactions()['data']
-
-        # Parse the transaction time from the orders
-        for order in orders:
-            order['_timestamp'] = float(re.search('(\d+\.\d+)', order['TransactionTime']).group(0))
-
-        # Sort them by timestamp in descending order
-        orders = sorted(orders, key=lambda order : -order['_timestamp'])
-
-        # Use the id of the first order that matches the given instrument
-        for order in orders:
-            if order['Symbol'].lower() == instrument.lower():
-                return order['Id']
-
-        return -1
-
-    def update_order(self, order, commission):
-        orders = self._get_portfolio_orders_and_transactions()['data']
-
-        for r_order in orders:
-            if r_order['Id'] == order.getId():
-                is_open = bool(r_order['IsOpenOrder'])
-                is_aborted = bool(r_order['IsAbortedOrder'])
-                is_partial = bool(r_order['IsPartialOrder'])
-                quantity = int(r_order['CumulativeQuantity'])
-                average_price = float(r_order['CumulativeQuantityAveragePrice'])
-                price = average_price * quantity
-
-                if not is_open and not is_aborted and not is_partial:
-                    fees = 0.0
-                    if commission is not None:
-                        fees = commission.calculate(order, price, quantity)
-
-                    orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, fees, datetime.now())
-                    order.setExecuted(orderExecutionInfo)
-                elif is_aborted:
-                    order.switchState(broker.Order.State.CANCELED)
-
-                break
-
-    def place_order(self, order):
-        # Values used for market orders
-        limit_price = ''
-        stop_price = ''
-
-        if order.getType() in [broker.Order.Type.LIMIT, broker.Order.Type.STOP_LIMIT]:
-            limit_price = order.getLimitPrice()
-        if order.getType() in [broker.Order.Type.STOP, broker.Order.Type.STOP_LIMIT]:
-            stop_price = order.getStopPrice()
-
-        if order.getType() is not broker.Order.Type.MARKET:
-            duration = 1 if order.getGoodTillCanceled() else 0
-        else:
-            duration = 'GoodTillCanceled' if order.getGoodTillCanceled() else 'Day'
-
-        url = "%s/VirtualTrader/Order/Create" % self.base_url
-        data = {
-            'Duration': duration,
-            'Limit': limit_price,
-            'Stop': stop_price,
-            'PortfolioId': self.portfolio_id,
-            'OrderType': self.ALGO_TO_VTRADER_ORDER_TYPE[order.getType()],
-            'Status': '',
-            'KeySymbol': self._get_key(order.getInstrument()),
-            'IsFutureTrade': False,
-            'IsIndexOrCurrencyOptionTrade': False,
-            'X-Requested-With': 'XMLHttpRequest',
-        }
-
-        # We should repeat this for every leg in the spread, but we're only dealing with simple orders
-        leg_index = 0
-        action = self._get_order_action(order)
-        instrument_type = self._get_instrument_type(order.getInstrument())
-        if instrument_type == self.InstrumentType.STOCK:
-            data.update(self.__get_stock_leg(leg_index, action, order))
-        else:
-            raise Exception("Option orders are not yet supported.")
-            #data.update(self.__get_option_leg(leg_index, order))
-
-        data = urllib.urlencode(data)
-        response = self._getResponse(url, data)
-        if not 'Your order has been submitted' in response:
-            raise OrderFailed("Received invalid response: %s" % response)
-
-    def _get_order_action(self, order):
-        """ Maps the order action to the proper Vtrader action code. """
-
-        stockOrderActionMap = {
-            broker.Order.Action.BUY : self.Action.BUY_STOCK,
-            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_STOCK,
-            broker.Order.Action.SELL : self.Action.SELL_STOCK,
-            broker.Order.Action.SELL_SHORT : self.Action.SELL_STOCK_SHORT,
-        }
-
-        optionOrderActionMap = {
-            broker.Order.Action.BUY : self.Action.BUY_OPTION,
-            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_OPTION_TO_CLOSE,
-            broker.Order.Action.SELL : self.Action.SELL_OPTION_TO_CLOSE,
-            broker.Order.Action.SELL_SHORT : self.Action.SELL_OPTION,
-        }
-
-        orderActionMap = {
-            self.InstrumentType.STOCK : stockOrderActionMap,
-            self.InstrumentType.CALL_OPTION : optionOrderActionMap,
-            self.InstrumentType.PUT_OPTION : optionOrderActionMap,
-        }
-
-        instrument_type = self._get_instrument_type(order.getInstrument())
-        return orderActionMap[instrument_type][order.getAction()]
-
-    def __get_stock_leg(self, id, action, order):
-        leg_options = {
-            'Action': action,
-            'Quantity': order.getQuantity(),
-            'DisplaySymbol': order.getInstrument(),
-            'KeySymbol': self._get_key(order.getInstrument()),
-            'Exchange': 'TSX',
-            'UnderlyingSymbol': order.getInstrument(),
-            'UnderlyingKeySymbol': self._get_key(order.getInstrument()),
-            'UnderlyingExchange': 'TSX',
-            'AssetType': 'Stock',
-            'CFICode': 'ESXXXX',
-            'Expiration': '',
-            'Strike': '',
-            'CallPutIndicator': '',
-        }
-
-        leg = {}
-        for option in leg_options.keys():
-            leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
-        return leg
-
-    def get_positions(self):
-        positions = {}
-        position_rows = self._get_portfolio_positions()['data']
-        for position in position_rows:
-            positions[position['Symbol'].lower()] = int(position['Quantity']['RawData'])
-        return positions
-
-    def get_account_value(self):
-        return self.get_cash_value() + self.get_position_value()
-
-    def get_position_value(self):
+    def getPositionValue(self):
         """Returns the value of the current positions if they were to be sold at the current market prices."""
         position_value = 0
 
-        position_rows = self._get_portfolio_positions()['data']
-        quote_rows = self._get_portfolio_quotes()['data']
+        position_rows = self._getPortfolioPositions()['data']
+        quote_rows = self._getPortfolioQuotes()['data']
         for position_row in position_rows:
             symbol = position_row['Symbol']
             is_option = bool(position_row['IsOption'])
@@ -342,81 +206,30 @@ class VtraderClient(object):
 
         return position_value
 
-    def get_estimated_account_value(self):
-        account_balance = self._get_account_balance()
+    def getAccountValue(self):
+        """Returns the total value of current positions and cash on hand."""
+        return self.getCashValue() + self.getPositionValue()
+
+    def getPositions(self):
+        positions = {}
+        position_rows = self._getPortfolioPositions()['data']
+        for position in position_rows:
+            positions[position['Symbol'].lower()] = int(position['Quantity']['RawData'])
+        return positions
+
+    def getEstimatedAccountValue(self):
+        account_balance = self._getAccountBalance()
         return float(account_balance['AccountValue']['RawData'])
 
-    def get_estimated_position_value(self):
-        account_balance = self._get_account_balance()
+    def getEstimatedPositionValue(self):
+        account_balance = self._getAccountBalance()
         return float(account_balance['CurrentPositionValue']['RawData'])
 
-    def get_outstanding_orders_value(self):
-        account_balance = self._get_account_balance()
-        return float(account_balance['TotalOutstandingOrdersValue']['RawData'])
-
-    def get_num_open_orders(self):
-        open_orders = self._get_open_orders()
+    def getNumOpenOrders(self):
+        open_orders = self._getOpenOrders()
         return int(open_orders['total'])
 
-    def _get_cookie_file(self):
-        """Returns the filename used to store the cookies which is unique for every username/url pair."""
-
-        # Hash the URL instead of storing the path
-        m = hashlib.md5()
-        m.update(self.base_url)
-        return os.path.join(self.home, "vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
-
-    def _get_portfolio_id(self):
-        portfolios = self.getPortfolios()
-
-        if portfolios.has_key(self.portfolio_name):
-            return portfolios[self.portfolio_name]
-        else:
-            raise PortfolioNotFound()
-
-    def _get_summary(self):
-        url = "%s/VirtualTrader/Portfolio/GetSummary" % self.base_url
-        return self._getResponse(url, isJson=True)
-
-    def _get_account_balance(self):
-        url = "%s/VirtualTrader/AccountBalance/GetDashboardAccountBalance" % (self.base_url)
-        data = urllib.urlencode({
-            'portfolioId': self.portfolio_id,
-            })
-        return  self._getResponse(url, data, isJson=True)
-
-    def _get_portfolio_quotes(self):
-        url = "%s/VirtualTrader/Portfolio/PortfolioQuotes_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
-        data = urllib.urlencode({
-            'page': 1,
-            'orderBy': 'Change-desc',
-            })
-        return self._getResponse(url, data, isJson=True)
-
-    def _get_portfolio_positions(self):
-        url = "%s/VirtualTrader/Portfolio/PortfolioPositions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
-        data = urllib.urlencode({
-            'page': 1,
-            'orderBy': 'PortfolioMarketValuePerc-desc',
-            })
-        return self._getResponse(url, data, isJson=True)
-
-    def _get_portfolio_transaction_history(self):
-        url = "%s/VirtualTrader/Order/PortfolioTransactionHistory_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
-        data = urllib.urlencode({
-            'portfolioId': self.portfolio_id,
-            })
-        return self._getResponse(url, data, isJson=True)
-
-    def _get_portfolio_orders_and_transactions(self, nbOrdersShow=5):
-        url = "%s/VirtualTrader/Order/PortfolioOrdersAndTransactions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
-        data = urllib.urlencode({
-            'portfolioId': self.portfolio_id,
-            'nbOrdersShow': nbOrdersShow,
-            })
-        return self._getResponse(url, data, isJson=True)
-
-    def _get_available_stocks(self):
+    def getAvailableStockSymbols(self):
         stocks = {}
 
         terms = [c for c in string.lowercase]
@@ -424,29 +237,269 @@ class VtraderClient(object):
 
         for term in terms:
             url = "%s/VirtualTrader/Search/Stock?term=%s" % (self.base_url, term)
-            list_of_stocks = self._getCachedResponse(url, isJson=True)
+            list_of_stocks = self._getCachedResponse(url, is_json=True)
             for entry in list_of_stocks:
                 stocks[entry['Symbol']] = entry
 
         return stocks
 
-    def _get_open_orders(self):
+    def updateOrder(self, order, commission):
+        """Updates the order to reflect the order state on the server."""
+        orders = self._getPortfolioOrdersAndTransactions()['data']
+
+        for remoteOrder in orders:
+            if remoteOrder['Id'] == order.getId():
+                is_open = bool(remoteOrder['IsOpenOrder'])
+                is_aborted = bool(remoteOrder['IsAbortedOrder'])
+                is_partial = bool(remoteOrder['IsPartialOrder'])
+                quantity = int(remoteOrder['CumulativeQuantity'])
+                average_price = float(remoteOrder['CumulativeQuantityAveragePrice'])
+                price = average_price * quantity
+
+                if not is_open and not is_aborted and not is_partial:
+                    fees = 0.0
+                    if commission is not None:
+                        fees = commission.calculate(order, price, quantity)
+
+                    orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, fees, datetime.now())
+                    order.setExecuted(orderExecutionInfo)
+                elif is_aborted:
+                    order.switchState(broker.Order.State.CANCELED)
+
+                break
+
+    def cancelOrder(self, order):
+        """Cancels the order on the server."""
+        url = self.base_url + "/VirtualTrader/Order/CancelOrder"
+        data = urllib.urlencode({
+            'orderId': order.getId(),
+            'portfolioId': self.portfolio_id,
+            })
+        return self._getResponse(url, data, is_json=True)
+
+    def placeOrder(self, order):
+        """Places the order on the server and updates the order id if successful.
+
+           @throws OrderFailed
+        """
+
+        # Determine the limit and stop prices if applicable
+        limit_price = ''
+        stop_price = ''
+
+        if order.getType() in [broker.Order.Type.LIMIT, broker.Order.Type.STOP_LIMIT]:
+            limit_price = order.getLimitPrice()
+        if order.getType() in [broker.Order.Type.STOP, broker.Order.Type.STOP_LIMIT]:
+            stop_price = order.getStopPrice()
+
+        # Determine the duration
+        if order.getType() is not broker.Order.Type.MARKET:
+            duration = 1 if order.getGoodTillCanceled() else 0
+        else:
+            duration = 'GoodTillCanceled' if order.getGoodTillCanceled() else 'Day'
+
+        # Build the data to post
+        url = "%s/VirtualTrader/Order/Create" % self.base_url
+        data = {
+            'Duration': duration,
+            'Limit': limit_price,
+            'Stop': stop_price,
+            'PortfolioId': self.portfolio_id,
+            'OrderType': self.ALGO_TO_VTRADER_ORDER_TYPE[order.getType()],
+            'Status': '',
+            'KeySymbol': self._getKeySymbol(order.getInstrument()),
+            'IsFutureTrade': False,
+            'IsIndexOrCurrencyOptionTrade': False,
+            'X-Requested-With': 'XMLHttpRequest',
+        }
+
+        # Add a leg for every instrument and action in the order
+        # Since we're not dealing with spreads, we only need to add a single leg
+        leg_index = 0
+        action = self._getOrderAction(order)
+        instrument_type = self._getInstrumentType(order.getInstrument())
+        if instrument_type == self.InstrumentType.STOCK:
+            data.update(self._getStockLeg(leg_index, action, order))
+        else:
+            data.update(self._getOptionLeg(leg_index, action, order))
+
+        # Make the request
+        data = urllib.urlencode(data)
+        response = self._getResponse(url, data)
+        if not 'Your order has been submitted' in response:
+            raise OrderFailed("Received invalid response: %s" % response)
+
+        # Update the order
+        order_id = self._getBestOrderId(order)
+        order.setId(order_id)
+
+    def _getBestOrderId(self, order):
+        """Attempts to retrieve the id for a recently placed order using all of the known attributes.
+           This is required since the Vtrader API does not return the order ID when the order is submitted
+
+        .. note::
+            * This has some limitations in a multi-threaded or multi-client environment, but
+              its the best we can do given the constraints of the API
+        """
+        orders = self._getPortfolioOrdersAndTransactions()['data']
+
+        # Parse the transaction time from the orders
+        for remoteOrder in orders:
+            remoteOrder['_timestamp'] = float(re.search('(\d+\.\d+)', remoteOrder['TransactionTime']).group(0))
+
+        # Sort them by timestamp in descending order
+        orders = sorted(orders, key=lambda order : -order['_timestamp'])
+
+        # Use the id of the first order that matches the given instrument
+        for remoteOrder in orders:
+            # Match the instrument
+            if remoteOrder['Symbol'].lower() != order.getInstrument().lower():
+                continue
+
+            # Match the order type
+            if self.VTRADER_TO_ALGO_ORDER_TYPE[remoteOrder['OrderType']] != order.getType():
+                continue
+
+            # Match the quantity
+            if int(remoteOrder['TotalQuantity']) != order.getQuantity():
+                continue
+
+            # All checks passed, assume this is the order we just place
+            return remoteOrder['Id']
+
+        logger.error("Failed to the determine the id for a recently place order. (%d orders returned)" % (len(orders)))
+        raise OrderFailed()
+
+    def _getOrderAction(self, order):
+        """ Maps the order action to the proper Vtrader action code. """
+
+        stockOrderActionMap = {
+            broker.Order.Action.BUY : self.Action.BUY_STOCK,
+            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_STOCK,
+            broker.Order.Action.SELL : self.Action.SELL_STOCK,
+            broker.Order.Action.SELL_SHORT : self.Action.SELL_STOCK_SHORT,
+        }
+
+        optionOrderActionMap = {
+            broker.Order.Action.BUY : self.Action.BUY_OPTION,
+            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_OPTION_TO_CLOSE,
+            broker.Order.Action.SELL : self.Action.SELL_OPTION_TO_CLOSE,
+            broker.Order.Action.SELL_SHORT : self.Action.SELL_OPTION,
+        }
+
+        orderActionMap = {
+            self.InstrumentType.STOCK : stockOrderActionMap,
+            self.InstrumentType.CALL_OPTION : optionOrderActionMap,
+            self.InstrumentType.PUT_OPTION : optionOrderActionMap,
+        }
+
+        instrument_type = self._getInstrumentType(order.getInstrument())
+        return orderActionMap[instrument_type][order.getAction()]
+
+    def _getStockLeg(self, id, action, order):
+        """ Builds an order leg for a stock. """
+
+        leg_options = {
+            'Action': action,
+            'Quantity': order.getQuantity(),
+            'DisplaySymbol': order.getInstrument(),
+            'KeySymbol': self._getKeySymbol(order.getInstrument()),
+            'Exchange': 'TSX',
+            'UnderlyingSymbol': order.getInstrument(),
+            'UnderlyingKeySymbol': self._getKeySymbol(order.getInstrument()),
+            'UnderlyingExchange': 'TSX',
+            'AssetType': 'Stock',
+            'CFICode': 'ESXXXX',
+            'Expiration': '',
+            'Strike': '',
+            'CallPutIndicator': '',
+        }
+
+        leg = {}
+        for option in leg_options.keys():
+            leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
+        return leg
+
+    def _getOptionLeg(self, id, action, order):
+        """ Builds an order leg for an option. """
+
+        raise Exception("Options are not yet supported")
+        # leg_options = {
+        #     'Action': action,
+        #     'Quantity': int(qty),
+        #     'DisplaySymbol': option.stock.symbol,
+        #     'KeySymbol': self.__get_key(option),
+        #     'Exchange': 'MX',
+        #     'UnderlyingSymbol': option.stock.symbol,
+        #     'UnderlyingKeySymbol': self.__get_key(option.stock),
+        #     'UnderlyingExchange': 'TSX',
+        #     'AssetType': 'Option',
+        #     'CFICode': 'OXXXXX',
+        #     'Expiration': option.expiry.strftime('%y|%m|%d'),
+        #     'Strike': option.strike,
+        #     'CallPutIndicator': 1 if option.type == StockOption.CALL else 2,
+        # }
+        #
+        # leg = {}
+        # for option in leg_options.keys():
+        #     leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
+        # return leg
+
+    def _getPortfolioId(self):
+        portfolios = self.getPortfolios()
+
+        if portfolios.has_key(self.portfolio_name):
+            return portfolios[self.portfolio_name]
+        else:
+            raise PortfolioNotFound()
+
+    def _getAccountBalance(self):
+        url = "%s/VirtualTrader/AccountBalance/GetDashboardAccountBalance" % (self.base_url)
+        data = urllib.urlencode({
+            'portfolioId': self.portfolio_id,
+            })
+        return  self._getResponse(url, data, is_json=True)
+
+    def _getPortfolioQuotes(self):
+        url = "%s/VirtualTrader/Portfolio/PortfolioQuotes_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
+        data = urllib.urlencode({
+            'page': 1,
+            'orderBy': 'Change-desc',
+            })
+        return self._getResponse(url, data, is_json=True)
+
+    def _getPortfolioPositions(self):
+        url = "%s/VirtualTrader/Portfolio/PortfolioPositions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
+        data = urllib.urlencode({
+            'page': 1,
+            'orderBy': 'PortfolioMarketValuePerc-desc',
+            })
+        return self._getResponse(url, data, is_json=True)
+
+    def _getPortfolioTransactionHistory(self):
+        url = "%s/VirtualTrader/Order/PortfolioTransactionHistory_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
+        data = urllib.urlencode({
+            'portfolioId': self.portfolio_id,
+            })
+        return self._getResponse(url, data, is_json=True)
+
+    def _getPortfolioOrdersAndTransactions(self, number_of_orders_to_show=12):
+        url = "%s/VirtualTrader/Order/PortfolioOrdersAndTransactions_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
+        data = urllib.urlencode({
+            'portfolioId': self.portfolio_id,
+            'nbOrdersShow': number_of_orders_to_show,
+            })
+        return self._getResponse(url, data, is_json=True)
+
+    def _getOpenOrders(self):
         url = "%s/VirtualTrader/Order/PortfolioOpenOrders_AjaxGrid/%s" % (self.base_url, self.portfolio_id)
         data = urllib.urlencode({
             'page': 1,
             'size': 100,
             })
-        return self._getResponse(url, data, isJson=True)
+        return self._getResponse(url, data, is_json=True)
 
-    def _cancel_order(self, order_id):
-        url = self.base_url + "/VirtualTrader/VirtualTrader/Order/CancelOrder"
-        data = urllib.urlencode({
-            'orderId': order_id,
-            'portfolioId': self.portfolio_id,
-            })
-        return self._getResponse(url, data, isJson=True)
-
-    def _get_instrument_type(self, instrument):
+    def _getInstrumentType(self, instrument):
         """Returns the type of instrument. Valid instrument types are:
 
          * InstrumentType.STOCK
@@ -455,8 +508,8 @@ class VtraderClient(object):
         """
         return VtraderClient.InstrumentType.STOCK
 
-    def _get_key(self, instrument):
-        type = self._get_instrument_type(instrument)
+    def _getKeySymbol(self, instrument):
+        type = self._getInstrumentType(instrument)
 
         if type == VtraderClient.InstrumentType.STOCK:
             return 'ca;%s' % instrument
@@ -480,10 +533,46 @@ class VtraderClient(object):
             'Login.Password': self.password,
             'Login.RememberMe': False,
             })
-        self._getResponse(url, data, autoAuth=False)
-        self.cj.save(ignore_discard=True)
+        self._getResponse(url, data, auto_auth=False)
+        if self.save_cookies_to_disk:
+            self.cj.save(ignore_discard=True)
 
-    def _get_opener(self, set_referer=True, is_ajax=False):
+    @Memoize(expiry=CACHE_EXPIRY_IN_SECONDS)
+    def _getCachedResponse(self, *args, **kwargs):
+        return self._getResponse(*args, **kwargs)
+
+    def _getResponse(self, url, data=None, is_json=False, auto_auth=True):
+        logger.debug("HTTP request to %s with: %s" % (url, data))
+
+        response = None
+        retry = True
+        while retry:
+            retry = False
+
+            try:
+                opener = self._getUrlOpener(is_ajax=is_json)
+                result = opener.open(url, data=data)
+                response = result.read()
+                result.close()
+                opener.close()
+            except urllib2.HTTPError, e:
+                # If we're forbidden, authenticate, and retry
+                if auto_auth and e.code == 403:
+                    self._authenticate()
+                    retry = True
+                else:
+                    raise
+
+        try:
+            logger.debug("HTTP response from %s: %s" % (url, response))
+        except UnicodeDecodeError:
+            logger.debug("HTTP response from %s: (Failed to decode response)" % url)
+
+        if is_json:
+            return json.loads(response)
+        return response
+
+    def _getUrlOpener(self, set_referer=True, is_ajax=False):
         opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cj))
 
         headers = [
@@ -497,37 +586,10 @@ class VtraderClient(object):
 
         return opener
 
-    @Memoize(expiry=cache_expiry_in_seconds)
-    def _getCachedResponse(self, *args, **kwargs):
-        return self._getResponse(*args, **kwargs)
+    def _getCookieFile(self):
+        """Returns the filename used to store the cookies which is unique for every username/url pair."""
 
-    def _getResponse(self, url, data=None, isJson=False, autoAuth=True):
-        logger.debug("HTTP request to %s with: %s" % (url, data))
-
-        response = None
-        retry = True
-        while retry:
-            retry = False
-
-            try:
-                opener = self._get_opener(is_ajax=isJson)
-                result = opener.open(url, data=data)
-                response = result.read()
-                result.close()
-                opener.close()
-            except urllib2.HTTPError, e:
-                # If we're forbidden, authenticate, and retry
-                if autoAuth and e.code == 403:
-                    self._authenticate()
-                    retry = True
-                else:
-                    raise
-
-        try:
-            logger.debug("HTTP response from %s: %s" % (url, response))
-        except UnicodeDecodeError:
-            logger.debug("HTTP response from %s: (Failed to decode response)" % url)
-
-        if isJson:
-            return json.loads(response)
-        return response
+        # Hash the URL instead of storing the path
+        m = hashlib.md5()
+        m.update(self.base_url)
+        return os.path.join(self.HOME, "vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
