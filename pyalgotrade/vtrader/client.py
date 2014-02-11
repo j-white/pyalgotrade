@@ -83,13 +83,26 @@ class Instrument(object):
 
     @staticmethod
     def fromSymbol(symbol):
-        return Stock(symbol)
+        try:
+            return Option(symbol)
+        except ValueError:
+            # If it's not an option, assume it's a stock
+            return Stock(symbol)
 
     def getSymbol(self):
         return self.__symbol
 
     def getExchange(self):
         raise NotImplementedError()
+
+    def __str__(self):
+        return str(self.__symbol)
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def __cmp__(self, other):
+        return cmp(str(self), str(other))
 
 class Stock(Instrument):
     EXCHANGE = 'TSX'
@@ -105,29 +118,38 @@ class Stock(Instrument):
         return Stock.EXCHANGE
 
 class Option(Instrument):
+    REGEX = '^([A-Z\.]+)([0-9]{2})([0-9]{2})([0-9]{2})([CP])([0-9\.]+)$'
     EXCHANGE = 'MX'
 
     def __init__(self, symbol):
         super(Option, self).__init__(symbol)
 
+        m = re.match(Option.REGEX, symbol, re.I)
+        if m is None:
+            raise ValueError('Invalid option symbol' + symbol)
+
+        self.__underlying = Stock(m.group(1))
+        self.__expiry = datetime.strptime('%s %s %s' % (m.group(2), m.group(3), m.group(4)), '%y %m %d').date()
+        self.__is_call = m.group(5).upper() == 'C'
+        self.__strike = float(m.group(6))
+
     def getExchange(self):
         return Option.EXCHANGE
 
     def getUnderlying(self):
-        raise NotImplementedError()
-
-    def isCall(self):
-        raise NotImplementedError()
-
-    def isPut(self):
-        return not self.isCall()
-
-    def getStrike(self):
-        raise NotImplementedError()
+        return self.__underlying
 
     def getExpiry(self):
-        raise NotImplementedError()
+        return self.__expiry
 
+    def isCall(self):
+        return self.__is_call
+
+    def isPut(self):
+        return not self.__is_call
+
+    def getStrike(self):
+        return self.__strike
 
 class OrderFailed(Exception):
     """ Thrown when an error occurs placing an order. """
@@ -260,7 +282,7 @@ class VtraderClient(object):
         positions = {}
         position_rows = self._getPortfolioPositions()['data']
         for position in position_rows:
-            positions[position['Symbol'].lower()] = int(position['Quantity']['RawData'])
+            positions[position['Symbol']] = int(position['Quantity']['RawData'])
         return positions
 
     def getEstimatedAccountValue(self):
@@ -370,7 +392,7 @@ class VtraderClient(object):
         elif isinstance(instrument, Option):
             data.update(self._getOptionLeg(leg_index, action, order, instrument))
         else:
-            raise Exception("Unsupported instrument " + instrument)
+            raise Exception("Unsupported instrument %s" % instrument)
 
         # Make the request
         data = urllib.urlencode(data)

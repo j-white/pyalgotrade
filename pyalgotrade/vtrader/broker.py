@@ -58,8 +58,7 @@ class VtraderBroker(broker.Broker):
 
     def getShares(self, instrument):
         """Returns the number of shares for an instrument."""
-        positions = self.getPositions()
-        return positions[instrument] if positions.has_key(instrument) else 0
+        return self.getPositions().get(instrument, 0)
 
     def getPositions(self):
         """Returns a dictionary that maps instruments to shares."""

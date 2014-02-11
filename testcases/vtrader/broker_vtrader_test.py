@@ -79,18 +79,36 @@ class BacktestBrokerVisitor(common.BrokerVisitor):
         broker.backtest.onBars(dateTime, bars)
         broker.updateActiveOrders()
 
-class VtraderBrokerTestCase:
+class VtraderBrokerStockTestCase:
+    TestInstrument = 'BB'
     Factory = BacktestBrokerFactory()
     Visitor = BacktestBrokerVisitor()
 
-class BrokerTestCase(VtraderBrokerTestCase, common.BrokerTestCase):
+class VtraderBrokerOptionTestCase:
+    TestInstrument = 'BB140322C10.00'
+    Factory = BacktestBrokerFactory()
+    Visitor = BacktestBrokerVisitor()
+
+class BrokerTestCaseWithStock(VtraderBrokerStockTestCase, common.BrokerTestCase):
     pass
 
-class MarketOrderTestCase(VtraderBrokerTestCase, common.MarketOrderTestCase):
+class MarketOrderTestCaseWithStock(VtraderBrokerStockTestCase, common.MarketOrderTestCase):
     pass
 
-class LimitOrderTestCase(VtraderBrokerTestCase, common.LimitOrderTestCase):
+class LimitOrderTestCaseWithStock(VtraderBrokerStockTestCase, common.LimitOrderTestCase):
     pass
 
-class StopOrderTestCase(VtraderBrokerTestCase, common.StopOrderTestCase):
+class StopOrderTestCaseWithStock(VtraderBrokerStockTestCase, common.StopOrderTestCase):
+    pass
+
+class BrokerTestCaseWithOption(VtraderBrokerOptionTestCase, common.BrokerTestCase):
+    pass
+
+class MarketOrderTestCaseWithOption(VtraderBrokerOptionTestCase, common.MarketOrderTestCase):
+    pass
+
+class LimitOrderTestCaseWithOption(VtraderBrokerOptionTestCase, common.LimitOrderTestCase):
+    pass
+
+class StopOrderTestCaseWithOption(VtraderBrokerOptionTestCase, common.StopOrderTestCase):
     pass
