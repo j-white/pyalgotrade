@@ -428,6 +428,8 @@ class VtraderClient(object):
         # Sort them by timestamp in descending order
         orders = sorted(orders, key=lambda order : -order['_timestamp'])
 
+        logger.debug("Sorted orders: %s" % orders)
+
         # Use the id of the first order that matches the given instrument
         for remoteOrder in orders:
             # Match the instrument
@@ -438,9 +440,10 @@ class VtraderClient(object):
             if self.VTRADER_TO_ALGO_ORDER_TYPE[remoteOrder['OrderType']] != order.getType():
                 continue
 
-            # Match the quantity
-            if int(remoteOrder['TotalQuantity']) != order.getQuantity():
-                continue
+            # The quantity gets reset to 0 if the order is immediately rejected, so we can't rely on this
+            # # Match the quantity
+            # if int(remoteOrder['TotalQuantity']) != order.getQuantity():
+            #     continue
 
             # All checks passed, assume this is the order we just place
             return remoteOrder['Id']
