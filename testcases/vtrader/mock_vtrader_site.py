@@ -28,11 +28,13 @@ from jinja2 import Environment
 import time
 import datetime
 
+def isAuthenticated(request):
+    return request.getCookie("_auth") is not None
+
 def authenticated():
     def wrap(f):
         def wrapped_f(self, request):
-            authCookie = request.getCookie("_auth")
-            if authCookie is None:
+            if not isAuthenticated(request):
                 msg = "Client not authenticated"
                 request.setResponseCode(403, msg)
                 return msg
@@ -127,7 +129,18 @@ class PortfolioPositions(JSONResource):
         return str(response)
 
 class PortfolioDashboard(HTMLResource):
-    HTML = """
+    UNAUTHENTICATED_HTML = """
+    <td>
+      <div>
+        <input id="Login_UserName" name="Login.UserName" type="text" value="" />
+      </div>
+      <div>
+        <input id="Login_Password" name="Login.Password" type="password" />
+      </div>
+    </td>
+    """
+
+    AUTHENTICATED_HTML = """
     <div>
      <ul>
       {%- for pname, pid in portfolios.iteritems() %}
@@ -145,11 +158,13 @@ class PortfolioDashboard(HTMLResource):
         HTMLResource.__init__(self)
         self.site = site
 
-    @authenticated()
     def render_GET(self, request):
         HTMLResource.render_GET(self, request)
+
+        template = self.AUTHENTICATED_HTML if isAuthenticated(request) else self.UNAUTHENTICATED_HTML
+
         portfolios = {self.site.portfolio_name : self.site.portfolio_id}
-        response = self.j2env.from_string(self.HTML).render(portfolios=portfolios)
+        response = self.j2env.from_string(template).render(portfolios=portfolios)
         return str(response)
 
 class DashboardAccountBalance(JSONResource):

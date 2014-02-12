@@ -187,7 +187,7 @@ class VtraderClient(object):
         SELL_OPTION_TO_CLOSE    = 6
 
     def __init__(self, portfolio, username, password, url, save_cookies_to_disk=False):
-        self.base_url = url
+        self.base_url = url.strip("/")
         self.username = username
         self.password = password
         self.save_cookies_to_disk = save_cookies_to_disk
@@ -601,6 +601,9 @@ class VtraderClient(object):
     def _getCachedResponse(self, *args, **kwargs):
         return self._getResponse(*args, **kwargs)
 
+    def _isLoginPage(self, response):
+        return re.search("Login_UserName.*Login\.UserName.*Login_Password.*Login\.Password", response, re.DOTALL) is not None
+
     def _getResponse(self, url, data=None, is_json=False, auto_auth=True):
         logger.debug("HTTP request to %s with: %s" % (url, data))
 
@@ -608,6 +611,7 @@ class VtraderClient(object):
         retry = True
         while retry:
             retry = False
+            need_to_auth = False
 
             try:
                 opener = self._getUrlOpener(is_ajax=is_json)
@@ -617,11 +621,17 @@ class VtraderClient(object):
                 opener.close()
             except urllib2.HTTPError, e:
                 # If we're forbidden, authenticate, and retry
-                if auto_auth and e.code == 403:
-                    self._authenticate()
-                    retry = True
+                if e.code == 403:
+                    need_to_auth = True
                 else:
                     raise
+
+            if self._isLoginPage(response):
+                need_to_auth = True
+
+            if auto_auth and need_to_auth:
+                self._authenticate()
+                retry = True
 
         try:
             logger.debug("HTTP response from %s: %s" % (url, response))
@@ -653,3 +663,4 @@ class VtraderClient(object):
         m = hashlib.md5()
         m.update(self.base_url)
         return os.path.join(self.HOME, "vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
+
