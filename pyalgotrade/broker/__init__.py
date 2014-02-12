@@ -34,6 +34,7 @@ from pyalgotrade import observer
 # ACCEPTED          -> FILLED
 # ACCEPTED          -> PARTIALLY_FILLED
 # ACCEPTED          -> CANCELED
+# PARTIALLY_FILLED  -> PARTIALLY_FILLED
 # PARTIALLY_FILLED  -> FILLED
 # PARTIALLY_FILLED  -> CANCELED
 
@@ -110,8 +111,8 @@ class Order(object):
     VALID_TRANSITIONS = {
         State.INITIAL : [State.SUBMITTED, State.CANCELED],
         State.SUBMITTED : [State.ACCEPTED, State.CANCELED],
-        State.ACCEPTED : [State.FILLED, State.PARTIALLY_FILLED, State.CANCELED],
-        State.PARTIALLY_FILLED : [State.FILLED, State.CANCELED],
+        State.ACCEPTED : [State.PARTIALLY_FILLED, State.FILLED, State.CANCELED],
+        State.PARTIALLY_FILLED : [State.PARTIALLY_FILLED, State.FILLED, State.CANCELED],
     }
 
     def __init__(self, orderId, type_, action, instrument, quantity):
@@ -123,9 +124,11 @@ class Order(object):
         self.__instrument = instrument
         self.__quantity = quantity
         self.__filled = 0
+        self.__avgFillPrice = None
         self.__executionInfo = None
         self.__goodTillCanceled = False
-        self.__allOrNone = True
+        self.__commissions = 0
+        self.__allOrNone = False
         self.__state = Order.State.INITIAL
 
     # This is to check that orders are not compared directly. order ids should be compared.
@@ -220,6 +223,13 @@ class Order(object):
         """Returns the number of shares still outstanding."""
         return self.__quantity - self.__filled
 
+    def getAvgFillPrice(self):
+        """Returns the average price of the shares that have been executed, or None if nothing has been filled."""
+        return self.__avgFillPrice
+
+    def getCommissions(self):
+        return self.__commissions
+
     def getGoodTillCanceled(self):
         """Returns True if the order is good till canceled."""
         return self.__goodTillCanceled
@@ -242,18 +252,36 @@ class Order(object):
         """Returns True if the order should be completely filled or else canceled."""
         return self.__allOrNone
 
-#    def setAllOrNone(self, allOrNone):
-#        """Sets the All-Or-None property for this order.
-#
-#        :param allOrNone: True if the order should be completely filled or else canceled.
-#        :type allOrNone: boolean.
-#        """
-#        self.__allOrNone = allOrNone
+    def setAllOrNone(self, allOrNone):
+        """Sets the All-Or-None property for this order.
 
-    def setExecuted(self, orderExecutionInfo):
+        :param allOrNone: True if the order should be completely filled.
+        :type allOrNone: boolean.
+
+        .. note:: This can't be changed once the order is submitted.
+        """
+        if self.__state != Order.State.INITIAL:
+            raise Exception("The order has already been submitted")
+        self.__allOrNone = allOrNone
+
+    def addExecutionInfo(self, orderExecutionInfo):
+        if orderExecutionInfo.getQuantity() > self.getRemaining():
+            raise Exception("Invalid fill size. %s remaining and %s filled" % (self.getRemaining(), orderExecutionInfo.getQuantity()))
+
+        if self.__avgFillPrice is None:
+            self.__avgFillPrice = orderExecutionInfo.getPrice()
+        else:
+            self.__avgFillPrice = (self.__avgFillPrice * self.__filled + orderExecutionInfo.getPrice() * orderExecutionInfo.getQuantity()) / float(self.__filled + orderExecutionInfo.getQuantity())
+
         self.__executionInfo = orderExecutionInfo
-        self.__state = Order.State.FILLED
         self.__filled += orderExecutionInfo.getQuantity()
+        self.__commissions += orderExecutionInfo.getCommission()
+
+        if self.getRemaining() == 0:
+            self.switchState(Order.State.FILLED)
+        else:
+            assert(not self.__allOrNone)
+            self.switchState(Order.State.PARTIALLY_FILLED)
 
     def switchState(self, newState):
         validTransitions = Order.VALID_TRANSITIONS.get(self.__state, [])
@@ -266,7 +294,8 @@ class Order(object):
         self.__state = newState
 
     def getExecutionInfo(self):
-        """Returns the order execution info if the order was filled, or None otherwise.
+        """Returns the last execution information for this order, or None if nothing has been filled so far.
+        This will be different every time an order, or part of it, gets filled.
 
         :rtype: :class:`OrderExecutionInfo`.
         """
@@ -297,15 +326,6 @@ class MarketOrder(Order):
         """Returns True if the order should be filled as close to the closing price as possible (Market-On-Close order)."""
         return self.__onClose
 
-    def setFillOnClose(self, onClose):
-        """Sets if the order should be filled as close to the closing price as possible (Market-On-Close order).
-
-        .. note:: This can't be changed once the order is submitted.
-        """
-        if self.getState() != Order.State.INITIAL:
-            raise Exception("The order has already been submitted")
-        self.__onClose = onClose
-
 
 class LimitOrder(Order):
     """Base class for limit orders.
@@ -322,15 +342,6 @@ class LimitOrder(Order):
     def getLimitPrice(self):
         """Returns the limit price."""
         return self.__limitPrice
-
-    def setLimitPrice(self, limitPrice):
-        """Updates the limit price.
-
-        .. note:: This can't be changed once the order is submitted.
-        """
-        if self.getState() != Order.State.INITIAL:
-            raise Exception("The order has already been submitted")
-        self.__limitPrice = limitPrice
 
 
 class StopOrder(Order):
@@ -349,16 +360,6 @@ class StopOrder(Order):
         """Returns the stop price."""
         return self.__stopPrice
 
-    def setStopPrice(self, stopPrice):
-        """Updates the stop price.
-
-        .. note:: This can't be changed once the order is submitted.
-        """
-        if self.getState() != Order.State.INITIAL:
-            raise Exception("The order has already been submitted")
-
-        self.__stopPrice = stopPrice
-
 
 class StopLimitOrder(Order):
     """Base class for stop limit orders.
@@ -372,44 +373,18 @@ class StopLimitOrder(Order):
         Order.__init__(self, orderId, Order.Type.STOP_LIMIT, action, instrument, quantity)
         self.__limitPrice = limitPrice
         self.__stopPrice = stopPrice
-        self.__limitOrderActive = False  # Set to true when the limit order is activated (stop price is hit)
 
     def getLimitPrice(self):
         """Returns the limit price."""
         return self.__limitPrice
 
-    def setLimitPrice(self, limitPrice):
-        """Updates the limit price.
-
-        .. note:: This can't be changed once the order is submitted.
-        """
-        if self.getState() != Order.State.INITIAL:
-            raise Exception("The order has already been submitted")
-        self.__limitPrice = limitPrice
-
     def getStopPrice(self):
         """Returns the stop price."""
         return self.__stopPrice
 
-    def setStopPrice(self, stopPrice):
-        """Updates the stop price.
-
-        .. note:: This can't be changed once the order is submitted.
-        """
-        if self.getState() != Order.State.INITIAL:
-            raise Exception("The order has already been submitted")
-        self.__stopPrice = stopPrice
-
-    def setLimitOrderActive(self, limitOrderActive):
-        self.__limitOrderActive = limitOrderActive
-
-    def isLimitOrderActive(self):
-        """Returns True if the limit order is active."""
-        return self.__limitOrderActive
-
 
 class OrderExecutionInfo(object):
-    """Execution information for a filled order."""
+    """Execution information for an order."""
     def __init__(self, price, quantity, commission, dateTime):
         self.__price = price
         self.__quantity = quantity
@@ -432,6 +407,31 @@ class OrderExecutionInfo(object):
         """Returns the :class:`datatime.datetime` when the order was executed."""
         return self.__dateTime
 
+class OrderEvent(object):
+    class Type:
+        ACCEPTED = 1  # Order has been acknowledged by the broker.
+        CANCELED = 2  # Order has been cancelled.
+        PARTIALLY_FILLED = 3  # Order has been partially filled.
+        FILLED = 4  # Order has been completely filled.
+
+    def __init__(self, order, eventyType, eventInfo):
+        self.__order = order
+        self.__eventType = eventyType
+        self.__eventInfo = eventInfo
+
+    def getOrder(self):
+        return self.__order
+
+    def getEventType(self):
+        return self.__eventType
+
+    # This depends on the event type:
+    # ACCEPTED: None
+    # CANCELED: A string with the reason why it was canceled.
+    # PARTIALLY_FILLED: An OrderExecutionInfo instance.
+    # FILLED: An OrderExecutionInfo instance.
+    def getEventInfo(self):
+        return self.__eventInfo
 
 ######################################################################
 ## Base broker class
@@ -444,10 +444,16 @@ class Broker(observer.Subject):
     """
 
     def __init__(self):
-        self.__orderUpdatedEvent = observer.Event()
+        self.__orderEvent = observer.Event()
 
+    def notifyOrderEvent(self, orderEvent):
+        self.__orderEvent.emit(self, orderEvent)
+
+    # Handlers should expect 2 parameters:
+    # 1: broker instance
+    # 2: OrderEvent instance
     def getOrderUpdatedEvent(self):
-        return self.__orderUpdatedEvent
+        return self.__orderEvent
 
     def getShares(self, instrument):
         """Returns the number of shares for an instrument."""
