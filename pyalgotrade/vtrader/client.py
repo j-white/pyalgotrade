@@ -162,7 +162,7 @@ class PortfolioNotFound(Exception):
 class VtraderClient(object):
     """An HTTP-based client that interfaces with the Vtrader platform"""
 
-    HOME = os.path.join(os.path.expanduser("~"), "pyalgotrader")
+    HOME = os.path.join(os.path.expanduser("~"), ".pyalgotrader")
     CACHE_EXPIRY_IN_SECONDS = 30
 
      # Maps the pyalgotrader order types to the Vtrader order types
@@ -186,7 +186,7 @@ class VtraderClient(object):
         SELL_OPTION             = 5
         SELL_OPTION_TO_CLOSE    = 6
 
-    def __init__(self, portfolio, username, password, url, save_cookies_to_disk=False):
+    def __init__(self, portfolio, username, password, url, save_cookies_to_disk=True):
         self.base_url = url.strip("/")
         self.username = username
         self.password = password
@@ -202,11 +202,13 @@ class VtraderClient(object):
         try:
             self.cj.load(ignore_discard=True)
         except IOError:
-            pass
+            if save_cookies_to_disk:
+                logger.warning("Could not load the cookies from %s. Ignoring." % self.cookie_file)
 
-        # Determine the portfolio id from the portfolio name
         self.portfolio_name = portfolio
+        logger.info("Retrieving the portfolio id for '%s'..." % self.portfolio_name)
         self.portfolio_id = self._getPortfolioId()
+        logger.info("Using portfolio id %s for '%s'" % (self.portfolio_id, self.portfolio_name))
 
     def getPortfolios(self):
         """Retrieves the available portfolio names and corresponding ids from the server.
@@ -520,6 +522,8 @@ class VtraderClient(object):
         if portfolios.has_key(self.portfolio_name):
             return portfolios[self.portfolio_name]
         else:
+            logger.error("No portfolio named '%s' found. Available portfolio names are %s" %
+                         (self.portfolio_name, portfolios.keys()))
             raise PortfolioNotFound()
 
     def _getAccountBalance(self):
@@ -587,6 +591,8 @@ class VtraderClient(object):
             raise Exception("Unsupported instrument " + instrument)
 
     def _authenticate(self):
+        logger.info("Authenticating the Vtrader client with username '%s'" % self.username)
+
         url = "%s/Authentication" % self.base_url
         data = urllib.urlencode({
             'Login.UserName': self.username,
@@ -595,6 +601,7 @@ class VtraderClient(object):
             })
         self._getResponse(url, data, auto_auth=False)
         if self.save_cookies_to_disk:
+            logger.debug("Saving cookies to %s" % self.cookie_file)
             self.cj.save(ignore_discard=True)
 
     @Memoize(expiry=CACHE_EXPIRY_IN_SECONDS)
