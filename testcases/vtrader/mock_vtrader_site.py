@@ -107,6 +107,7 @@ class PortfolioPositions(JSONResource):
                             {
                                 "PortfolioId": "{{ portfolio_id }}",
                                 "Symbol": "{{ instrument }}",
+                                "IsOption": false,
                                 "Quantity": {
                                     "RawData": {{ quantity }},
                                     "FormattedData": "{{ quantity }}"
@@ -125,6 +126,67 @@ class PortfolioPositions(JSONResource):
     @authenticated()
     def render_POST(self, request):
         JSONResource.render_GET(self, request)
+        response = self.j2env.from_string(self.JSON).render(portfolio_id=self.site.portfolio_id, broker=self.site.broker)
+        return str(response)
+
+class PortfolioQuotes(JSONResource):
+    JSON = """ {
+                    "data": [
+                        {
+                            "RowId": "ed35e204-60b4-4414-a52d-0c0424553b46",
+                            "PortfolioId": "{{ portfolio_id }}",
+                            "IsSymbolValid": true,
+                            "IsOption": false,
+                            "HasStockGuideProfile": true,
+                            "KeySymbol": "ca;VRX",
+                            "Quantity": {
+                                "RawData": -96,
+                                "FormattedData": "-96"
+                            },
+                            "Symbol": "VRX",
+                            "Exchange": "TSX",
+                            "Last": {
+                                "RawData": 114.91,
+                                "FormattedData": "114.91"
+                            },
+                            "Change": {
+                                "RawData": 1.53,
+                                "FormattedData": "1.53"
+                            },
+                            "Volume": {
+                                "RawData": 513521,
+                                "FormattedData": "513,521"
+                            },
+                            "DayLowHigh": {
+                                "RawData": 113.82,
+                                "FormattedData": "113.82"
+                            },
+                            "YearLowHigh": {
+                                "RawData": 50.904315,
+                                "FormattedData": "50.904315"
+                            },
+                            "Bid": {
+                                "RawData": 114.82,
+                                "FormattedData": "114.82"
+                            },
+                            "Ask": {
+                                "RawData": 115.11,
+                                "FormattedData": "115.11"
+                            }
+                        }
+                    ],
+                    "total": 1
+                }"""
+
+    def __init__(self, site):
+        JSONResource.__init__(self)
+        self.site = site
+
+    @authenticated()
+    def render_POST(self, request):
+        JSONResource.render_GET(self, request)
+        page = int(request.args['page'][0])
+        orderBy = request.args['orderBy'][0]
         response = self.j2env.from_string(self.JSON).render(portfolio_id=self.site.portfolio_id, broker=self.site.broker)
         return str(response)
 
@@ -171,8 +233,8 @@ class DashboardAccountBalance(JSONResource):
     JSON = """ {
                 "PortfolioId": "{{ portfolio_id }}",
                 "AccountValue": {
-                    "RawData": 0,
-                    "FormattedData": "$0.00"
+                    "RawData": {{ '%.2f' | format(broker.getEquity()) }},
+                    "FormattedData": "{{ broker.getEquity() }}"
                 },
                 "CurrentPositionValue": {
                     "RawData": 0,
@@ -231,14 +293,15 @@ class PortfolioOrdersAndTransactions(JSONResource):
                             "IsOpenOrder": {{ order.isActive()|lower }},
                             "IsPartialOrder": {{ order.isPartiallyFilled()|lower }},
                             "IsAbortedOrder": {{ order.isCanceled()|lower }},
+                            "AbortedMessage": null,
                             "KeySymbol": "ca;{{ order.getInstrument() }}",
-                            "Symbol": "{{ order.getInstrument()}}",
+                            "Symbol": "{{ order.getInstrument() }}",
                             "Description": "{{ order.getInstrument() }}",
                             "OrderType": "{{ order_to_type[order.getId()] }}",
                             "TotalQuantity": "{{ order.getQuantity() }}",
-                            "CumulativeQuantity": "{{ execInfo.getQuantity() }}",
-                            "CumulativeQuantityAveragePrice": "{{ execInfo.getPrice() / execInfo.getQuantity() }}",
-                            "RemainingQuantity": "{{ order.getQuantity() - execInfo.getQuantity() }}",
+                            "CumulativeQuantity": "{{ order.getFilled() }}",
+                            "CumulativeQuantityAveragePrice": "{{ order.getAvgFillPrice()|default('0.0', true) }}",
+                            "RemainingQuantity": "{{ order.getRemaining() }}",
                             "PriceLimit": null,
                             "StopPrice": null
                         }
@@ -402,6 +465,10 @@ class VtraderBrokerSite(server.Site):
         # /VirtualTrader/Portfolio/PortfolioPositions_AjaxGrid
         portfolio_positions = PortfolioPositions(self)
         portfolio.putChild('PortfolioPositions_AjaxGrid', portfolio_positions)
+
+        # /VirtualTrader/Portfolio/PortfolioQuotes_AjaxGrid
+        portfolio_quotes = PortfolioQuotes(self)
+        portfolio.putChild('PortfolioQuotes_AjaxGrid', portfolio_quotes)
 
         # /VirtualTrader/AccountBalance
         account_balance = PathResource()

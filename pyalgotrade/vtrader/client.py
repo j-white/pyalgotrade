@@ -240,13 +240,14 @@ class VtraderClient(object):
         account_balance = self._getAccountBalance()
         return float(account_balance['MoneyMarketCashValue']['RawData'])
 
-    def getPositionValue(self):
-        """Returns the value of the current positions if they were to be sold at the current market prices."""
+    def getShareValue(self):
+        """Returns the value of the current shares if they were to be closed at the current market prices."""
         position_value = 0
 
         position_rows = self._getPortfolioPositions()['data']
         quote_rows = self._getPortfolioQuotes()['data']
         for position_row in position_rows:
+
             symbol = position_row['Symbol']
             is_option = bool(position_row['IsOption'])
             quantity = int(position_row['Quantity']['RawData'])
@@ -276,9 +277,9 @@ class VtraderClient(object):
 
         return position_value
 
-    def getAccountValue(self):
+    def getEquity(self):
         """Returns the total value of current positions and cash on hand."""
-        return self.getCashValue() + self.getPositionValue()
+        return self.getCashValue() + self.getShareValue()
 
     def getPositions(self):
         positions = {}
@@ -322,21 +323,34 @@ class VtraderClient(object):
                 is_open = bool(remoteOrder['IsOpenOrder'])
                 is_aborted = bool(remoteOrder['IsAbortedOrder'])
                 is_partial = bool(remoteOrder['IsPartialOrder'])
-                quantity = int(remoteOrder['CumulativeQuantity'])
-                average_price = float(remoteOrder['CumulativeQuantityAveragePrice'])
-                price = average_price * quantity
+                cumulative_qty = int(remoteOrder['CumulativeQuantity'])
+                cumulative_avg_price = float(remoteOrder['CumulativeQuantityAveragePrice'])
+                cumulative_price = cumulative_avg_price * cumulative_qty
 
-                if not is_open and not is_aborted and not is_partial:
-                    fees = 0.0
-                    if commission is not None:
-                        fees = commission.calculate(order, price, quantity)
-
-                    orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, fees, datetime.now())
-                    order.setExecuted(orderExecutionInfo)
-                elif is_aborted:
+                if is_aborted:
                     order.switchState(broker.Order.State.CANCELED)
+                elif not is_open or is_partial:
+                    # Determine the price and quantity of the delta (remote state - local state)
+                    prev_qty = order.getFilled()
+                    prev_avg_price = 0.0 if order.getAvgFillPrice() is None else order.getAvgFillPrice()
+                    prev_price = prev_avg_price * prev_qty
 
+                    delta_qty = cumulative_qty - prev_qty
+                    delta_price = cumulative_price - prev_price
+                    delta_avg_price = delta_price / delta_qty
+
+                    delta_commission = 0.0
+                    if commission is not None:
+                        delta_commission = commission.calculate(order, delta_avg_price, delta_qty)
+
+                    orderExecutionInfo = broker.OrderExecutionInfo(delta_avg_price, delta_qty,
+                                                                   delta_commission, datetime.now())
+                    order.addExecutionInfo(orderExecutionInfo)
+
+                    return orderExecutionInfo
                 break
+
+        return None
 
     def cancelOrder(self, order):
         """Cancels the order on the server."""

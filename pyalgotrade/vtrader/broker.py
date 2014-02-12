@@ -45,20 +45,35 @@ class VtraderBroker(broker.Broker):
     """A Vtrader broker."""
     COMMISSION_PER_TRADE = 9.95
 
-    def __init__(self, portfolio, username, password, url,
-                 client=None, commission=backtesting.FixedPerTrade(COMMISSION_PER_TRADE)):
+    def __init__(self, portfolio, username, password, url):
         broker.Broker.__init__(self)
         self.__activeOrders = {}
-        self.client = client if client is not None else VtraderClient(portfolio, username, password, url)
-        self.commission = commission
+        self.__client = VtraderClient(portfolio, username, password, url)
+        self.__commission = backtesting.FixedPerTrade(self.COMMISSION_PER_TRADE)
+
+    def getCommission(self):
+        return self.__commission
+
+    def setCommission(self, commission):
+        self.__commission = commission
+
+    def getClient(self):
+        return self.__client
+
+    def setClient(self, client):
+        self.__client = client
 
     def getCash(self):
         """Returns the amount of available buying power in dollars."""
-        return self.client.getCashValue()
+        return self.__client.getCashValue()
 
-    def getPositionValue(self):
-        """Returns the value of the current positions if they were to be sold at the current market prices."""
-        return self.client.getPositionValue()
+    def getShareValue(self):
+        """Returns the value of the current shares if they were to be closed at the current market prices."""
+        return self.__client.getShareValue()
+
+    def getEquity(self):
+        """Returns the portfolio value (cash + shares)."""
+        return self.__client.getEstimatedAccountValue()
 
     def getShares(self, instrument):
         """Returns the number of shares for an instrument."""
@@ -66,12 +81,12 @@ class VtraderBroker(broker.Broker):
 
     def getPositions(self):
         """Returns a dictionary that maps instruments to shares."""
-        return self.client.getPositions()
+        return self.__client.getPositions()
 
     def placeOrder(self, order):
         if order.isInitial():
             # Place the order and set the order's id
-            self.client.placeOrder(order)
+            self.__client.placeOrder(order)
             self.__activeOrders[order.getId()] = order
 
             # Switch from INITIAL -> SUBMITTED
@@ -90,19 +105,20 @@ class VtraderBroker(broker.Broker):
             # Switch from SUBMITTED -> ACCEPTED
             if order.isSubmitted():
                 order.switchState(broker.Order.State.ACCEPTED)
-                self.getOrderUpdatedEvent().emit(self, order)
+                self.notifyOrderEvent(broker.OrderEvent(order, broker.OrderEvent.Type.ACCEPTED, None))
 
-            if order.isAccepted():
-                # Update the order
-                self.client.updateOrder(order, commission=self.commission)
+            # Update the order to reflect the remote state
+            orderExecutionInfo = self.__client.updateOrder(order, commission=self.__commission)
 
-                if not order.isActive():
-                    del self.__activeOrders[order.getId()]
-                    self.getOrderUpdatedEvent().emit(self, order)
-            else:
-                assert(not order.isActive())
+            # Notify the order update
+            if order.isCanceled():
                 del self.__activeOrders[order.getId()]
-                self.getOrderUpdatedEvent().emit(self, order)
+                self.notifyOrderEvent(broker.OrderEvent(order, broker.OrderEvent.Type.CANCELED, None))
+            if order.isFilled():
+                del self.__activeOrders[order.getId()]
+                self.notifyOrderEvent(broker.OrderEvent(order, broker.OrderEvent.Type.FILLED, orderExecutionInfo))
+            elif order.isPartiallyFilled():
+                self.notifyOrderEvent(broker.OrderEvent(order, broker.OrderEvent.Type.PARTIALLY_FILLED, orderExecutionInfo))
 
     def createMarketOrder(self, action, instrument, quantity, onClose=False):
         return MarketOrder(-1, action, instrument, quantity, onClose)
@@ -123,6 +139,7 @@ class VtraderBroker(broker.Broker):
         if activeOrder.isFilled():
             raise Exception("Can't cancel order that has already been filled")
 
-        self.client.cancelOrder(order)
-        del self.__activeOrders[order.getId()]
+        self.__client.cancelOrder(order)
+        del self.__activeOrders[activeOrder.getId()]
         activeOrder.switchState(broker.Order.State.CANCELED)
+        self.notifyOrderEvent(broker.OrderEvent(activeOrder, broker.OrderEvent.Type.CANCELED, "User requested cancellation"))

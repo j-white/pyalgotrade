@@ -20,7 +20,7 @@
 
 from pyalgotrade.broker import backtesting
 from pyalgotrade.vtrader import VtraderBroker, VtraderClient
-import testcases.broker_common as common
+import testcases.broker_backtesting_test as backtesting_test
 
 from threading import Thread
 from twisted.internet import reactor
@@ -30,18 +30,29 @@ from mock_vtrader_site import VtraderBrokerSite
 def tearDownModule():
     reactor.callFromThread(reactor.stop)
 
-class BacktestBrokerFactory(common.BrokerFactory):
+class BacktestingBroker(backtesting.Broker):
+    def __init__(self, cash, barFeed, commission=None):
+        super(BacktestingBroker, self).__init__(cash, barFeed, commission)
+
+    def onBars(self, dateTime, bars):
+        super(BacktestingBroker, self).onBars(dateTime, bars)
+        self.vtrader.updateActiveOrders()
+
+class VtraderBrokerTestCase(object):
     PortfolioName = "test"
     PortfolioUsername = "testuser"
     PortfolioPassword = "testpass"
 
-    def getBroker(self, cash, barFeed, commission=None):
+    def buildBarFeed(self, *args, **kwargs):
+        return backtesting_test.BarFeed(*args, **kwargs)
+
+    def buildBroker(self, *args, **kwargs):
         """ Returns both a VirtualTraderBroker and a BacktestingBroker.
             The VirtualTraderBroker interfaces with a mock webservice that is backed
             by the BacktestingBroker.
         """
         # Create a backtesting broker used to back the mock server
-        backtest = backtesting.Broker(cash, barFeed, commission=commission)
+        backtest = BacktestingBroker(*args, **kwargs)
 
         # Create a new site instance
         site = VtraderBrokerSite(self.PortfolioUsername, self.PortfolioPassword, self.PortfolioName, backtest)
@@ -57,16 +68,17 @@ class BacktestBrokerFactory(common.BrokerFactory):
         client = VtraderClient(self.PortfolioName, self.PortfolioUsername,
                                self.PortfolioPassword, url,
                                save_cookies_to_disk=False)
-        vtrader = VtraderBroker(self.PortfolioName, self.PortfolioUsername, self.PortfolioPassword, url,
-                                client=client, commission=commission)
+        vtrader = VtraderBroker(self.PortfolioName, self.PortfolioUsername, self.PortfolioPassword, url)
+        vtrader.setClient(client)
+        vtrader.setCommission(kwargs.get('commission', None))
 
         # Store the ref to the backtest
         vtrader.backtest = backtest
 
-        return vtrader
+        # And store a ref to the vtrader
+        backtest.vtrader = vtrader
 
-    def getFixedCommissionPerTrade(self, amount):
-        return backtesting.FixedPerTrade(amount)
+        return vtrader
 
     def runReactor(self):
         try:
@@ -74,41 +86,26 @@ class BacktestBrokerFactory(common.BrokerFactory):
         except ReactorAlreadyRunning:
             pass
 
-class BacktestBrokerVisitor(common.BrokerVisitor):
-    def onBars(self, broker, dateTime, bars):
-        broker.backtest.onBars(dateTime, bars)
-        broker.updateActiveOrders()
+class BrokerTestCase(VtraderBrokerTestCase, backtesting_test.BrokerTestCase):
+    def testPartialFillAndCancel(self):
+        pass
 
-class VtraderBrokerStockTestCase:
-    TestInstrument = 'BB'
-    Factory = BacktestBrokerFactory()
-    Visitor = BacktestBrokerVisitor()
+    def testOneCancelsAnother(self):
+        pass
 
-class VtraderBrokerOptionTestCase:
-    TestInstrument = 'BB140322C10.00'
-    Factory = BacktestBrokerFactory()
-    Visitor = BacktestBrokerVisitor()
+class MarketOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.MarketOrderTestCase):
+    def setUp(self):
+        backtesting_test.BaseTestCase.TestInstrument = 'BB'
 
-class BrokerTestCaseWithStock(VtraderBrokerStockTestCase, common.BrokerTestCase):
-    pass
+class LimitOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.LimitOrderTestCase):
+    def setUp(self):
+        backtesting_test.BaseTestCase.TestInstrument = 'BB'
 
-class MarketOrderTestCaseWithStock(VtraderBrokerStockTestCase, common.MarketOrderTestCase):
-    pass
+class StopOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.LimitOrderTestCase):
+    def setUp(self):
+        backtesting_test.BaseTestCase.TestInstrument = 'BB'
 
-class LimitOrderTestCaseWithStock(VtraderBrokerStockTestCase, common.LimitOrderTestCase):
-    pass
-
-class StopOrderTestCaseWithStock(VtraderBrokerStockTestCase, common.StopOrderTestCase):
-    pass
-
-class BrokerTestCaseWithOption(VtraderBrokerOptionTestCase, common.BrokerTestCase):
-    pass
-
-class MarketOrderTestCaseWithOption(VtraderBrokerOptionTestCase, common.MarketOrderTestCase):
-    pass
-
-class LimitOrderTestCaseWithOption(VtraderBrokerOptionTestCase, common.LimitOrderTestCase):
-    pass
-
-class StopOrderTestCaseWithOption(VtraderBrokerOptionTestCase, common.StopOrderTestCase):
-    pass
+# class MarketOrderTestCaseWithOption(VtraderBrokerTestCase, backtesting_test.MarketOrderTestCase):
+#     def setUp(self):
+#         backtesting_test.BaseTestCase.TestInstrument = 'BB140322C10.00'
+#
