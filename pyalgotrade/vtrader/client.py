@@ -162,7 +162,7 @@ class PortfolioNotFound(Exception):
 class VtraderClient(object):
     """An HTTP-based client that interfaces with the Vtrader platform"""
 
-    HOME = os.path.join(os.path.expanduser("~"), ".pyalgotrader")
+    HOME = os.path.join(os.path.expanduser("~"), ".pyalgotrade")
     CACHE_EXPIRY_IN_SECONDS = 30
 
      # Maps the pyalgotrader order types to the Vtrader order types
@@ -370,6 +370,11 @@ class VtraderClient(object):
 
         instrument = Instrument.fromSymbol(order.getInstrument())
 
+        # They KeySymbol should always be for the underlying security
+        root_key_symbol = self._getKeySymbol(instrument)
+        if isinstance(instrument, Option):
+            root_key_symbol = self._getKeySymbol(instrument.getUnderlying())
+
         # Build the data to post
         url = "%s/VirtualTrader/Order/Create" % self.base_url
         data = {
@@ -379,7 +384,7 @@ class VtraderClient(object):
             'PortfolioId': self.portfolio_id,
             'OrderType': self.ALGO_TO_VTRADER_ORDER_TYPE[order.getType()],
             'Status': '',
-            'KeySymbol': self._getKeySymbol(instrument),
+            'KeySymbol': root_key_symbol,
             'IsFutureTrade': False,
             'IsIndexOrCurrencyOptionTrade': False,
             'X-Requested-With': 'XMLHttpRequest',
@@ -388,7 +393,7 @@ class VtraderClient(object):
         # Add a leg for every instrument and action in the order
         # Since we're not dealing with spreads, we only need to add a single leg
         leg_index = 0
-        action = self._getOrderAction(order, instrument)
+        action = self._getOrderAction(order.getAction(), instrument)
         if isinstance(instrument, Stock):
             data.update(self._getStockLeg(leg_index, action, order, instrument))
         elif isinstance(instrument, Option):
@@ -418,7 +423,7 @@ class VtraderClient(object):
 
         # Parse the transaction time from the orders
         for remoteOrder in orders:
-            remoteOrder['_timestamp'] = float(re.search('(\d+\.\d+)', remoteOrder['TransactionTime']).group(0))
+            remoteOrder['_timestamp'] = float(re.search('(\d+\.?\d*)', remoteOrder['TransactionTime']).group(0))
 
         # Sort them by timestamp in descending order
         orders = sorted(orders, key=lambda order : -order['_timestamp'])
@@ -443,21 +448,22 @@ class VtraderClient(object):
         logger.error("Failed to the determine the id for a recently place order. (%d orders returned)" % (len(orders)))
         raise OrderFailed()
 
-    def _getOrderAction(self, order, instrument):
+    @staticmethod
+    def _getOrderAction(action, instrument):
         """ Maps the order action to the proper Vtrader action code. """
 
         stockOrderActionMap = {
-            broker.Order.Action.BUY : self.Action.BUY_STOCK,
-            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_STOCK,
-            broker.Order.Action.SELL : self.Action.SELL_STOCK,
-            broker.Order.Action.SELL_SHORT : self.Action.SELL_STOCK_SHORT,
+            broker.Order.Action.BUY : VtraderClient.Action.BUY_STOCK,
+            broker.Order.Action.BUY_TO_COVER : VtraderClient.Action.BUY_STOCK,
+            broker.Order.Action.SELL : VtraderClient.Action.SELL_STOCK,
+            broker.Order.Action.SELL_SHORT : VtraderClient.Action.SELL_STOCK_SHORT,
         }
 
         optionOrderActionMap = {
-            broker.Order.Action.BUY : self.Action.BUY_OPTION,
-            broker.Order.Action.BUY_TO_COVER : self.Action.BUY_OPTION_TO_CLOSE,
-            broker.Order.Action.SELL : self.Action.SELL_OPTION_TO_CLOSE,
-            broker.Order.Action.SELL_SHORT : self.Action.SELL_OPTION,
+            broker.Order.Action.BUY : VtraderClient.Action.BUY_OPTION,
+            broker.Order.Action.BUY_TO_COVER : VtraderClient.Action.BUY_OPTION_TO_CLOSE,
+            broker.Order.Action.SELL : VtraderClient.Action.SELL_OPTION_TO_CLOSE,
+            broker.Order.Action.SELL_SHORT : VtraderClient.Action.SELL_OPTION,
         }
 
         orderActionMap = {
@@ -465,19 +471,20 @@ class VtraderClient(object):
             Option : optionOrderActionMap,
         }
 
-        return orderActionMap[instrument.__class__][order.getAction()]
+        return orderActionMap[instrument.__class__][action]
 
-    def _getStockLeg(self, id, action, order, stock):
+    @staticmethod
+    def _getStockLeg(id, action, order, stock):
         """ Builds an order leg for a stock. """
 
         leg_options = {
             'Action': action,
-            'Quantity': order.getQuantity(),
+            'Quantity': order.getQuantity(), # Qty should always be an integer
             'DisplaySymbol': stock.getSymbol(),
-            'KeySymbol': self._getKeySymbol(stock),
+            'KeySymbol': VtraderClient._getKeySymbol(stock),
             'Exchange': stock.getExchange(),
             'UnderlyingSymbol': stock.getSymbol(),
-            'UnderlyingKeySymbol': self._getKeySymbol(stock),
+            'UnderlyingKeySymbol': VtraderClient._getKeySymbol(stock),
             'UnderlyingExchange': stock.getExchange(),
             'AssetType': 'Stock',
             'CFICode': 'ESXXXX',
@@ -491,18 +498,19 @@ class VtraderClient(object):
             leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
         return leg
 
-    def _getOptionLeg(self, id, action, order, option):
+    @staticmethod
+    def _getOptionLeg(id, action, order, option):
         """ Builds an order leg for an option. """
 
         underlying = option.getUnderlying()
         leg_options = {
             'Action': action,
-            'Quantity': order.getQuantity(),
-            'DisplaySymbol': option.getSymbol(),
-            'KeySymbol': self._getKeySymbol(option),
+            'Quantity': int(order.getQuantity()), # Qty should always be an integer
+            'DisplaySymbol': underlying.getSymbol(),
+            'KeySymbol': VtraderClient._getKeySymbol(option),
             'Exchange': option.getExchange(),
             'UnderlyingSymbol': underlying.getSymbol(),
-            'UnderlyingKeySymbol': self._getKeySymbol(underlying),
+            'UnderlyingKeySymbol': VtraderClient._getKeySymbol(underlying),
             'UnderlyingExchange': underlying.getExchange(),
             'AssetType': 'Option',
             'CFICode': 'OXXXXX',
@@ -515,6 +523,25 @@ class VtraderClient(object):
         for option in leg_options.keys():
             leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
         return leg
+
+    @staticmethod
+    def _getKeySymbol(instrument):
+        if isinstance(instrument, Stock):
+            stock = instrument
+            return 'ca;%s' % stock.getSymbol()
+        elif isinstance(instrument, Option):
+            option = instrument
+            expiry_date = option.getExpiry()
+            yy = expiry_date.strftime('%y')
+            offset = 64 if option.isCall() else 76
+            mm = chr(offset + expiry_date.month)
+            dd = expiry_date.strftime('%d')
+
+            return 'ca;O:%s\\%s%s%s\\%.1f' % (option.getUnderlying().getClassSymbol(),
+                                              yy, mm, dd,
+                                              option.getStrike())
+        else:
+            raise Exception("Unsupported instrument " + instrument)
 
     def _getPortfolioId(self):
         portfolios = self.getPortfolios()
@@ -572,24 +599,6 @@ class VtraderClient(object):
             })
         return self._getResponse(url, data, is_json=True)
 
-    def _getKeySymbol(self, instrument):
-        if isinstance(instrument, Stock):
-            stock = instrument
-            return 'ca;%s' % stock.getSymbol()
-        elif isinstance(instrument, Option):
-            option = instrument
-            expiry_date = datetime.today()
-            yy = expiry_date.strftime('%y')
-            offset = 64 if option.isCall() else 76
-            mm = chr(offset + expiry_date.month)
-            dd = expiry_date.strftime('%d')
-
-            return 'ca;O:%s\\%s%s%s\\%.1f' % (option.getUnderlying().getClassSymbol(),
-                                              yy, mm, dd,
-                                              option.getStrike())
-        else:
-            raise Exception("Unsupported instrument " + instrument)
-
     def _authenticate(self):
         logger.info("Authenticating the Vtrader client with username '%s'" % self.username)
 
@@ -612,7 +621,10 @@ class VtraderClient(object):
         return re.search("Login_UserName.*Login\.UserName.*Login_Password.*Login\.Password", response, re.DOTALL) is not None
 
     def _getResponse(self, url, data=None, is_json=False, auto_auth=True):
-        logger.debug("HTTP request to %s with: %s" % (url, data))
+        if data is None:
+            logger.debug("Making HTTP request to %s" % url)
+        else:
+            logger.debug("Making HTTP request to %s with: %s" % (url, data))
 
         response = None
         retry = True
@@ -641,9 +653,9 @@ class VtraderClient(object):
                 retry = True
 
         try:
-            logger.debug("HTTP response from %s: %s" % (url, response))
+            logger.debug("Got HTTP response from %s: %s" % (url, response))
         except UnicodeDecodeError:
-            logger.debug("HTTP response from %s: (Failed to decode response)" % url)
+            logger.debug("Got HTTP response from %s: (Failed to decode response)" % url)
 
         if is_json:
             return json.loads(response)

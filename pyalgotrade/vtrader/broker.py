@@ -56,6 +56,10 @@ class VtraderBroker(broker.Broker):
         """Returns the amount of available buying power in dollars."""
         return self.client.getCashValue()
 
+    def getPositionValue(self):
+        """Returns the value of the current positions if they were to be sold at the current market prices."""
+        return self.client.getPositionValue()
+
     def getShares(self, instrument):
         """Returns the number of shares for an instrument."""
         return self.getPositions().get(instrument, 0)

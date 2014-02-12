@@ -20,17 +20,19 @@
 
 import unittest
 import datetime
-from pyalgotrade.vtrader import client
+
+from pyalgotrade.vtrader.client import Instrument, Stock, Option, VtraderClient
+from pyalgotrade import broker
 
 class InstrumentTestCase(unittest.TestCase):
     def testInstrumentFromSymbol(self):
-        stock = client.Instrument.fromSymbol('BB')
-        self.assertTrue(isinstance(stock, client.Stock))
+        stock = Instrument.fromSymbol('BB')
+        self.assertTrue(isinstance(stock, Stock))
         self.assertEqual(stock.getSymbol(), 'BB')
         self.assertEqual(stock.getClassSymbol(), 'BB')
 
-        option = client.Instrument.fromSymbol('BB140322C10.00')
-        self.assertTrue(isinstance(option, client.Option))
+        option = Instrument.fromSymbol('BB140322C10.00')
+        self.assertTrue(isinstance(option, Option))
         self.assertEqual(option.getSymbol(), 'BB140322C10.00')
         self.assertEqual(option.getUnderlying(), stock)
         self.assertTrue(option.isCall())
@@ -38,11 +40,21 @@ class InstrumentTestCase(unittest.TestCase):
         self.assertEqual(option.getStrike(), 10.00)
         self.assertEqual(option.getExpiry(), datetime.date(2014, 03, 22))
 
-        option = client.Instrument.fromSymbol('BB130621P11.00')
-        self.assertTrue(isinstance(option, client.Option))
+        option = Instrument.fromSymbol('BB130621P11.00')
+        self.assertTrue(isinstance(option, Option))
         self.assertEqual(option.getSymbol(), 'BB130621P11.00')
         self.assertEqual(option.getUnderlying(), stock)
         self.assertTrue(option.isPut())
         self.assertFalse(option.isCall())
         self.assertEqual(option.getStrike(), 11.00)
         self.assertEqual(option.getExpiry(), datetime.date(2013, 06, 21))
+
+    def testActionCode(self):
+        option = Instrument.fromSymbol('BB140222C10.00')
+        action = VtraderClient._getOrderAction(broker.Order.Action.BUY, option)
+        self.assertEqual(action, VtraderClient.Action.BUY_OPTION)
+
+    def testKeySymbol(self):
+        option = Instrument.fromSymbol('BB140222C10.00')
+        self.assertEqual(option.getExpiry(), datetime.date(2014, 02, 22))
+        self.assertEqual('ca;O:BB\\14B22\\10.0', VtraderClient._getKeySymbol(option))
