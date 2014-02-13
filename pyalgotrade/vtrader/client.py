@@ -186,6 +186,38 @@ class VtraderClient(object):
         SELL_OPTION             = 5
         SELL_OPTION_TO_CLOSE    = 6
 
+    STOCK_ALGO_TO_VTRADER_ACTION_TYPE = {
+        broker.Order.Action.BUY : Action.BUY_STOCK,
+        broker.Order.Action.BUY_TO_COVER : Action.BUY_STOCK,
+        broker.Order.Action.SELL : Action.SELL_STOCK,
+        broker.Order.Action.SELL_SHORT : Action.SELL_STOCK_SHORT,
+    }
+
+    OPTION_ALGO_TO_VTRADER_ACTION_TYPE = {
+        broker.Order.Action.BUY : Action.BUY_OPTION,
+        broker.Order.Action.BUY_TO_COVER : Action.BUY_OPTION_TO_CLOSE,
+        broker.Order.Action.SELL : Action.SELL_OPTION_TO_CLOSE,
+        broker.Order.Action.SELL_SHORT : Action.SELL_OPTION,
+    }
+
+    ALGO_TO_VTRADER_ACTION_TYPE = {
+        Stock : STOCK_ALGO_TO_VTRADER_ACTION_TYPE,
+        Option : OPTION_ALGO_TO_VTRADER_ACTION_TYPE,
+    }
+
+    STOCK_VTRADER_TO_ALGO_ACTION_TYPE = {
+        Action.BUY_STOCK : broker.Order.Action.BUY,
+        Action.SELL_STOCK : broker.Order.Action.SELL,
+        Action.SELL_STOCK_SHORT : broker.Order.Action.SELL_SHORT
+    }
+
+    OPTION_VTRADER_TO_ALGO_ACTION_TYPE = {v:k for k, v in OPTION_ALGO_TO_VTRADER_ACTION_TYPE.items()}
+
+    VTRADER_TO_ALGO_ACTION_TYPE = {
+        Stock : STOCK_VTRADER_TO_ALGO_ACTION_TYPE,
+        Option : OPTION_VTRADER_TO_ALGO_ACTION_TYPE,
+    }
+
     def __init__(self, portfolio, username, password, url, save_cookies_to_disk=True):
         self.base_url = url.strip("/")
         self.username = username
@@ -327,28 +359,29 @@ class VtraderClient(object):
                 cumulative_avg_price = float(remoteOrder['CumulativeQuantityAveragePrice'])
                 cumulative_price = cumulative_avg_price * cumulative_qty
 
-                if is_aborted:
-                    order.switchState(broker.Order.State.CANCELED)
-                elif not is_open or is_partial:
-                    # Determine the price and quantity of the delta (remote state - local state)
-                    prev_qty = order.getFilled()
-                    prev_avg_price = 0.0 if order.getAvgFillPrice() is None else order.getAvgFillPrice()
-                    prev_price = prev_avg_price * prev_qty
+                # Determine the price and quantity of the delta (remote state - local state)
+                prev_qty = order.getFilled()
+                prev_avg_price = 0.0 if order.getAvgFillPrice() is None else order.getAvgFillPrice()
+                prev_price = prev_avg_price * prev_qty
 
-                    delta_qty = cumulative_qty - prev_qty
-                    delta_price = cumulative_price - prev_price
-                    delta_avg_price = delta_price / delta_qty
+                delta_qty = cumulative_qty - prev_qty
+                delta_price = cumulative_price - prev_price
+                delta_avg_price = delta_price / delta_qty if delta_qty <> 0 else 0
 
-                    delta_commission = 0.0
-                    if commission is not None:
-                        delta_commission = commission.calculate(order, delta_avg_price, delta_qty)
+                delta_commission = 0.0
+                if commission is not None:
+                    delta_commission = commission.calculate(order, delta_avg_price, delta_qty)
 
-                    orderExecutionInfo = broker.OrderExecutionInfo(delta_avg_price, delta_qty,
-                                                                   delta_commission, datetime.now())
+                orderExecutionInfo = broker.OrderExecutionInfo(delta_avg_price, delta_qty,
+                                                               delta_commission, datetime.now())
+
+                if orderExecutionInfo.getQuantity() > 0:
                     order.addExecutionInfo(orderExecutionInfo)
 
-                    return orderExecutionInfo
-                break
+                if is_aborted:
+                    order.switchState(broker.Order.State.CANCELED)
+
+                return orderExecutionInfo
 
         return None
 
@@ -442,8 +475,6 @@ class VtraderClient(object):
         # Sort them by timestamp in descending order
         orders = sorted(orders, key=lambda order : -order['_timestamp'])
 
-        logger.debug("Sorted orders: %s" % orders)
-
         # Use the id of the first order that matches the given instrument
         for remoteOrder in orders:
             # Match the instrument
@@ -469,26 +500,7 @@ class VtraderClient(object):
     def _getOrderAction(action, instrument):
         """ Maps the order action to the proper Vtrader action code. """
 
-        stockOrderActionMap = {
-            broker.Order.Action.BUY : VtraderClient.Action.BUY_STOCK,
-            broker.Order.Action.BUY_TO_COVER : VtraderClient.Action.BUY_STOCK,
-            broker.Order.Action.SELL : VtraderClient.Action.SELL_STOCK,
-            broker.Order.Action.SELL_SHORT : VtraderClient.Action.SELL_STOCK_SHORT,
-        }
-
-        optionOrderActionMap = {
-            broker.Order.Action.BUY : VtraderClient.Action.BUY_OPTION,
-            broker.Order.Action.BUY_TO_COVER : VtraderClient.Action.BUY_OPTION_TO_CLOSE,
-            broker.Order.Action.SELL : VtraderClient.Action.SELL_OPTION_TO_CLOSE,
-            broker.Order.Action.SELL_SHORT : VtraderClient.Action.SELL_OPTION,
-        }
-
-        orderActionMap = {
-            Stock : stockOrderActionMap,
-            Option : optionOrderActionMap,
-        }
-
-        return orderActionMap[instrument.__class__][action]
+        return VtraderClient.ALGO_TO_VTRADER_ACTION_TYPE[instrument.__class__][action]
 
     @staticmethod
     def _getStockLeg(id, action, order, stock):

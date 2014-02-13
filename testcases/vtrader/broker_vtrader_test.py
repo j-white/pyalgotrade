@@ -27,6 +27,12 @@ from twisted.internet import reactor
 from twisted.internet.error import ReactorAlreadyRunning
 from mock_vtrader_site import VtraderBrokerSite
 
+# Set the log level to WARN for testing
+import pyalgotrade.logger
+import logging
+logger = pyalgotrade.logger.getLogger("vtrader.client")
+logger.setLevel(logging.WARN)
+
 def tearDownModule():
     reactor.callFromThread(reactor.stop)
 
@@ -65,11 +71,9 @@ class VtraderBrokerTestCase(object):
 
         # Create a broker pointing to the new site instance
         url = "http://127.0.0.1:%d" % self.port.getHost().port
-        client = VtraderClient(self.PortfolioName, self.PortfolioUsername,
-                               self.PortfolioPassword, url,
-                               save_cookies_to_disk=False)
-        vtrader = VtraderBroker(self.PortfolioName, self.PortfolioUsername, self.PortfolioPassword, url)
-        vtrader.setClient(client)
+        vtrader = VtraderBroker(self.PortfolioName,
+                                self.PortfolioUsername, self.PortfolioPassword,
+                                url, save_cookies_to_disk=False)
         vtrader.setCommission(kwargs.get('commission', None))
 
         # Store the ref to the backtest
@@ -87,11 +91,14 @@ class VtraderBrokerTestCase(object):
             pass
 
 class BrokerTestCase(VtraderBrokerTestCase, backtesting_test.BrokerTestCase):
-    def testPartialFillAndCancel(self):
+    def testOneCancelsAnother(self):
+        # This test doesn't work since the order ids are not set until dispatchBars is called
         pass
 
-    def testOneCancelsAnother(self):
-        pass
+#
+# Different codes paths are used when handling stocks vs options, so
+# we verify these separately
+#
 
 class MarketOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.MarketOrderTestCase):
     def setUp(self):
@@ -105,7 +112,14 @@ class StopOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.LimitOr
     def setUp(self):
         backtesting_test.BaseTestCase.TestInstrument = 'BB'
 
-# class MarketOrderTestCaseWithOption(VtraderBrokerTestCase, backtesting_test.MarketOrderTestCase):
-#     def setUp(self):
-#         backtesting_test.BaseTestCase.TestInstrument = 'BB140322C10.00'
-#
+class MarketOrderTestCaseWithOption(VtraderBrokerTestCase, backtesting_test.MarketOrderTestCase):
+    def setUp(self):
+        backtesting_test.BaseTestCase.TestInstrument = 'BB140322C10.00'
+
+class LimitOrderTestCaseWithOption(VtraderBrokerTestCase, backtesting_test.LimitOrderTestCase):
+    def setUp(self):
+        backtesting_test.BaseTestCase.TestInstrument = 'BB140322C10.00'
+
+class StopOrderTestCaseWithOption(VtraderBrokerTestCase, backtesting_test.LimitOrderTestCase):
+    def setUp(self):
+        backtesting_test.BaseTestCase.TestInstrument = 'BB140322C10.00'

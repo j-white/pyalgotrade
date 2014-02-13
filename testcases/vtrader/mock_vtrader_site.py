@@ -18,7 +18,7 @@
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 
-from pyalgotrade.vtrader import VtraderClient
+from pyalgotrade.vtrader.client import VtraderClient, Instrument
 from pyalgotrade import broker
 
 from twisted.web import server, resource
@@ -345,19 +345,23 @@ class OrderCreate(HTMLResource):
 
     @authenticated()
     def render_POST(self, request):
-        instrument = request.args['OrderLegs[0].DisplaySymbol'][0]
         duration = request.args['Duration'][0]
+        asset_type = request.args['OrderLegs[0].AssetType'][0]
         vtrader_action = int(request.args['OrderLegs[0].Action'][0])
         quantity = int(request.args['OrderLegs[0].Quantity'][0])
         type = VtraderClient.VTRADER_TO_ALGO_ORDER_TYPE[request.args['OrderType'][0]]
 
-        pyalgo_action = broker.Order.Action.BUY
-        if vtrader_action == VtraderClient.Action.BUY_STOCK:
-            pyalgo_action = broker.Order.Action.BUY
-        elif vtrader_action == VtraderClient.Action.SELL_STOCK:
-            pyalgo_action = broker.Order.Action.SELL
-        elif vtrader_action == VtraderClient.Action.SELL_STOCK_SHORT:
-            pyalgo_action = broker.Order.Action.SELL_SHORT
+        # Determine the instrument's symbol based on the asset type
+        symbol = request.args['OrderLegs[0].DisplaySymbol'][0]
+        if 'option' == asset_type.lower():
+            underlying = request.args['OrderLegs[0].UnderlyingSymbol'][0]
+            is_call = int(request.args['OrderLegs[0].CallPutIndicator'][0]) == 1
+            expiration = datetime.datetime.strptime(request.args['OrderLegs[0].Expiration'][0], '%y|%m|%d').date()
+            strike = float(request.args['OrderLegs[0].Strike'][0])
+            symbol = "%s%s%s%.2f" % (underlying, expiration.strftime('%y%m%d'), 'C' if is_call else 'P', strike)
+
+        instrument = Instrument.fromSymbol(symbol)
+        action = VtraderClient.VTRADER_TO_ALGO_ACTION_TYPE[instrument.__class__][vtrader_action]
 
         # Parse the stop and limit fields, catch the exception since
         # these won't always be set
@@ -376,13 +380,13 @@ class OrderCreate(HTMLResource):
             good_till_canceled = True
 
         if type == broker.Order.Type.MARKET:
-            order = self.site.broker.createMarketOrder(pyalgo_action, instrument, quantity)
+            order = self.site.broker.createMarketOrder(action, instrument.getSymbol(), quantity)
         elif type == broker.Order.Type.LIMIT:
-            order = self.site.broker.createLimitOrder(pyalgo_action, instrument, limit, quantity)
+            order = self.site.broker.createLimitOrder(action, instrument.getSymbol(), limit, quantity)
         elif type == broker.Order.Type.STOP:
-            order = self.site.broker.createStopOrder(pyalgo_action, instrument, stop, quantity)
+            order = self.site.broker.createStopOrder(action, instrument.getSymbol(), stop, quantity)
         elif type == broker.Order.Type.STOP_LIMIT:
-            order = self.site.broker.createStopLimitOrder(pyalgo_action, instrument, stop, limit, quantity)
+            order = self.site.broker.createStopLimitOrder(action, instrument.getSymbol(), stop, limit, quantity)
         else:
             raise Exception("Invalid order type")
 

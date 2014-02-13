@@ -45,10 +45,10 @@ class VtraderBroker(broker.Broker):
     """A Vtrader broker."""
     COMMISSION_PER_TRADE = 9.95
 
-    def __init__(self, portfolio, username, password, url):
+    def __init__(self, *args, **kwargs):
         broker.Broker.__init__(self)
         self.__activeOrders = {}
-        self.__client = VtraderClient(portfolio, username, password, url)
+        self.__client = VtraderClient(*args, **kwargs)
         self.__commission = backtesting.FixedPerTrade(self.COMMISSION_PER_TRADE)
 
     def getCommission(self):
@@ -56,12 +56,6 @@ class VtraderBroker(broker.Broker):
 
     def setCommission(self, commission):
         self.__commission = commission
-
-    def getClient(self):
-        return self.__client
-
-    def setClient(self, client):
-        self.__client = client
 
     def getCash(self):
         """Returns the amount of available buying power in dollars."""
@@ -113,6 +107,8 @@ class VtraderBroker(broker.Broker):
             # Notify the order update
             if order.isCanceled():
                 del self.__activeOrders[order.getId()]
+                if orderExecutionInfo.getQuantity() > 0:
+                    self.notifyOrderEvent(broker.OrderEvent(order, broker.OrderEvent.Type.PARTIALLY_FILLED, orderExecutionInfo))
                 self.notifyOrderEvent(broker.OrderEvent(order, broker.OrderEvent.Type.CANCELED, None))
             if order.isFilled():
                 del self.__activeOrders[order.getId()]
