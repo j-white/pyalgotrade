@@ -710,5 +710,4 @@ class VtraderClient(object):
         # Hash the URL instead of storing the path
         m = hashlib.md5()
         m.update(self.base_url)
-        return os.path.join(self.HOME, "vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
-
+        return os.path.join(self.HOME, ".vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
