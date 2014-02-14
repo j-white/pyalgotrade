@@ -19,7 +19,7 @@
 """
 
 from pyalgotrade.broker import backtesting
-from pyalgotrade.vtrader import VtraderBroker, VtraderClient
+from pyalgotrade.vtrader import VtraderBroker
 import testcases.broker_backtesting_test as backtesting_test
 
 from threading import Thread

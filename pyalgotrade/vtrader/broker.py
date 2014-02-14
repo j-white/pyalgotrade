@@ -51,6 +51,9 @@ class VtraderBroker(broker.Broker):
         self.__client = VtraderClient(*args, **kwargs)
         self.__commission = backtesting.FixedPerTrade(self.COMMISSION_PER_TRADE)
 
+    def getClient(self):
+        return self.__client
+
     def getCommission(self):
         return self.__commission
 

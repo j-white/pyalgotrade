@@ -57,4 +57,4 @@ class InstrumentTestCase(unittest.TestCase):
     def testKeySymbol(self):
         option = Instrument.fromSymbol('BB140222C10.00')
         self.assertEqual(option.getExpiry(), datetime.date(2014, 02, 22))
-        self.assertEqual('ca;O:BB\\14B22\\10.0', VtraderClient._getKeySymbol(option))
+        self.assertEqual('ca;O:BB\\14B22\\10.0', option.getKeySymbol())

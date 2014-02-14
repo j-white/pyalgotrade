@@ -92,6 +92,9 @@ class Instrument(object):
     def getSymbol(self):
         return self.__symbol
 
+    def getKeySymbol(self):
+        raise NotImplementedError()
+
     def getExchange(self):
         raise NotImplementedError()
 
@@ -111,6 +114,9 @@ class Stock(Instrument):
         super(Stock, self).__init__(symbol)
         self.__class_symbol = symbol
 
+    def getKeySymbol(self):
+        return 'ca;%s' % self.getSymbol()
+
     def getClassSymbol(self):
         return self.__class_symbol
 
@@ -126,12 +132,22 @@ class Option(Instrument):
 
         m = re.match(Option.REGEX, symbol, re.I)
         if m is None:
-            raise ValueError('Invalid option symbol' + symbol)
+            raise ValueError('Invalid option symbol ' + symbol)
 
         self.__underlying = Stock(m.group(1))
         self.__expiry = datetime.strptime('%s %s %s' % (m.group(2), m.group(3), m.group(4)), '%y %m %d').date()
         self.__is_call = m.group(5).upper() == 'C'
         self.__strike = float(m.group(6))
+
+    def getKeySymbol(self):
+        yy = self.__expiry.strftime('%y')
+        offset = 64 if self.__is_call else 76
+        mm = chr(offset + self.__expiry.month)
+        dd = self.__expiry.strftime('%d')
+
+        return 'ca;O:%s\\%s%s%s\\%.1f' % (self.__underlying.getClassSymbol(),
+                                          yy, mm, dd,
+                                          self.__strike)
 
     def getExchange(self):
         return Option.EXCHANGE
@@ -418,9 +434,9 @@ class VtraderClient(object):
         instrument = Instrument.fromSymbol(order.getInstrument())
 
         # They KeySymbol should always be for the underlying security
-        root_key_symbol = self._getKeySymbol(instrument)
+        root_key_symbol = instrument.getKeySymbol()
         if isinstance(instrument, Option):
-            root_key_symbol = self._getKeySymbol(instrument.getUnderlying())
+            root_key_symbol = instrument.getUnderlying().getKeySymbol()
 
         # Build the data to post
         url = "%s/VirtualTrader/Order/Create" % self.base_url
@@ -510,10 +526,10 @@ class VtraderClient(object):
             'Action': action,
             'Quantity': order.getQuantity(), # Qty should always be an integer
             'DisplaySymbol': stock.getSymbol(),
-            'KeySymbol': VtraderClient._getKeySymbol(stock),
+            'KeySymbol': stock.getKeySymbol(),
             'Exchange': stock.getExchange(),
             'UnderlyingSymbol': stock.getSymbol(),
-            'UnderlyingKeySymbol': VtraderClient._getKeySymbol(stock),
+            'UnderlyingKeySymbol': stock.getKeySymbol(),
             'UnderlyingExchange': stock.getExchange(),
             'AssetType': 'Stock',
             'CFICode': 'ESXXXX',
@@ -536,10 +552,10 @@ class VtraderClient(object):
             'Action': action,
             'Quantity': int(order.getQuantity()), # Qty should always be an integer
             'DisplaySymbol': underlying.getSymbol(),
-            'KeySymbol': VtraderClient._getKeySymbol(option),
+            'KeySymbol': option.getKeySymbol(),
             'Exchange': option.getExchange(),
             'UnderlyingSymbol': underlying.getSymbol(),
-            'UnderlyingKeySymbol': VtraderClient._getKeySymbol(underlying),
+            'UnderlyingKeySymbol': underlying.getKeySymbol(),
             'UnderlyingExchange': underlying.getExchange(),
             'AssetType': 'Option',
             'CFICode': 'OXXXXX',
@@ -552,25 +568,6 @@ class VtraderClient(object):
         for option in leg_options.keys():
             leg['OrderLegs[%d].%s' % (id, option)] = leg_options[option]
         return leg
-
-    @staticmethod
-    def _getKeySymbol(instrument):
-        if isinstance(instrument, Stock):
-            stock = instrument
-            return 'ca;%s' % stock.getSymbol()
-        elif isinstance(instrument, Option):
-            option = instrument
-            expiry_date = option.getExpiry()
-            yy = expiry_date.strftime('%y')
-            offset = 64 if option.isCall() else 76
-            mm = chr(offset + expiry_date.month)
-            dd = expiry_date.strftime('%d')
-
-            return 'ca;O:%s\\%s%s%s\\%.1f' % (option.getUnderlying().getClassSymbol(),
-                                              yy, mm, dd,
-                                              option.getStrike())
-        else:
-            raise Exception("Unsupported instrument " + instrument)
 
     def _getPortfolioId(self):
         portfolios = self.getPortfolios()
