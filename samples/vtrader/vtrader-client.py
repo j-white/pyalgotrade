@@ -1,8 +1,7 @@
 import time
 import os
-import ConfigParser
 
-from pyalgotrade.vtrader import VtraderBroker
+from pyalgotrade.vtrader import VtraderBroker, utils
 from pyalgotrade import broker
 
 # # Uncomment to debug the HTTP requests
@@ -12,22 +11,7 @@ from pyalgotrade import broker
 # logger.setLevel(logging.DEBUG)
 
 def main():
-    # ~/.pyalgotrade/vtrader.cfg should contain something like:
-    sample_config = """
-    [vtrader]
-    portfolio: <YOUR-PORTFOLIO-NAME-HERE>
-    username: <YOUR-USERNAME-HERE>
-    password: <YOUR-PASSWORD-HERE>
-    url: <VTRADER-URL-HERE>
-    """
-
-    home = os.path.join(os.path.expanduser("~"), ".pyalgotrade")
-    config = ConfigParser.ConfigParser()
-    config.read(os.path.join(home, 'vtrader.cfg'))
-    config = dict(config.items('vtrader'))
-
-    brk = VtraderBroker(portfolio=config['portfolio'], username=config['username'],
-                        password=config['password'], url=config['url'])
+    brk = VtraderBroker(**utils.getConfig())
 
     print "Total equity: %f" % brk.getEquity()
     print "Cash value: %f" % brk.getCash()

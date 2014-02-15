@@ -18,19 +18,28 @@
 .. moduleauthor:: Jesse White <jwhite08@gmail.com>
 """
 
+from pyalgotrade import observer
 from pyalgotrade import broker
 from pyalgotrade.broker import backtesting
 from client import VtraderClient
 
-class VtraderOrder:
+class VtraderOrder(object):
     def setId(self, orderId):
         self.__id = orderId
 
     def getId(self):
         return self.__id
 
-class MarketOrder(VtraderOrder, broker.MarketOrder):
-    pass
+class MarketOrder(broker.MarketOrder):
+    def __init__(self, orderId, *args, **kwargs):
+        super(MarketOrder, self).__init__(orderId, *args, **kwargs)
+        self.__id = orderId
+
+    def setId(self, orderId):
+        self.__id = orderId
+
+    def getId(self):
+        return self.__id
 
 class LimitOrder(VtraderOrder, broker.LimitOrder):
     pass
@@ -41,7 +50,7 @@ class StopOrder(VtraderOrder, broker.StopOrder):
 class StopLimitOrder(VtraderOrder, broker.StopLimitOrder):
     pass
 
-class VtraderBroker(broker.Broker):
+class VtraderBroker(broker.Broker, observer.Subject):
     """A Vtrader broker."""
     COMMISSION_PER_TRADE = 9.95
 
@@ -142,3 +151,22 @@ class VtraderBroker(broker.Broker):
         del self.__activeOrders[activeOrder.getId()]
         activeOrder.switchState(broker.Order.State.CANCELED)
         self.notifyOrderEvent(broker.OrderEvent(activeOrder, broker.OrderEvent.Type.CANCELED, "User requested cancellation"))
+
+    # Methods from observer.Subject required when using the broker as part of a Strategy
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def join(self):
+        pass
+
+    def eof(self):
+        return True
+
+    def dispatch(self):
+        pass
+
+    def peekDateTime(self):
+        return None

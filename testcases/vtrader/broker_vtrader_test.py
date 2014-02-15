@@ -104,6 +104,10 @@ class MarketOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.Marke
     def setUp(self):
         backtesting_test.BaseTestCase.TestInstrument = 'BB'
 
+    def testBuy_GTC(self):
+        # Market orders do not support GTC
+        pass
+
 class LimitOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.LimitOrderTestCase):
     def setUp(self):
         backtesting_test.BaseTestCase.TestInstrument = 'BB'
@@ -115,6 +119,10 @@ class StopOrderTestCaseWithStock(VtraderBrokerTestCase, backtesting_test.LimitOr
 class MarketOrderTestCaseWithOption(VtraderBrokerTestCase, backtesting_test.MarketOrderTestCase):
     def setUp(self):
         backtesting_test.BaseTestCase.TestInstrument = 'BB140322C10.00'
+
+    def testBuy_GTC(self):
+        # Market orders do not support GTC
+        pass
 
 class LimitOrderTestCaseWithOption(VtraderBrokerTestCase, backtesting_test.LimitOrderTestCase):
     def setUp(self):

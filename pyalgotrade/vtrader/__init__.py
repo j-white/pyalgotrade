@@ -19,3 +19,4 @@
 """
 from broker import VtraderBroker
 from client import VtraderClient
+from strategy import VtraderStrategy

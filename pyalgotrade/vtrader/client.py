@@ -31,6 +31,7 @@ from datetime import datetime
 
 from pyalgotrade import broker
 import pyalgotrade.logger
+import utils
 
 logger = pyalgotrade.logger.getLogger("vtrader.client")
 
@@ -241,10 +242,6 @@ class VtraderClient(object):
         self.save_cookies_to_disk = save_cookies_to_disk
         self.cookie_file = self._getCookieFile()
 
-        # Create the working directory if not already present
-        if save_cookies_to_disk and not os.path.exists(self.HOME):
-            os.makedirs(self.HOME)
-
         # Fire up the cookie jar
         self.cj = cookielib.MozillaCookieJar(self.cookie_file)
         try:
@@ -429,7 +426,8 @@ class VtraderClient(object):
         if order.getType() is not broker.Order.Type.MARKET:
             duration = 1 if order.getGoodTillCanceled() else 0
         else:
-            duration = 'GoodTillCanceled' if order.getGoodTillCanceled() else 'Day'
+            # Market orders only do not support GTC
+            duration = 'Day'
 
         instrument = Instrument.fromSymbol(order.getInstrument())
 
@@ -707,4 +705,4 @@ class VtraderClient(object):
         # Hash the URL instead of storing the path
         m = hashlib.md5()
         m.update(self.base_url)
-        return os.path.join(self.HOME, ".vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
+        return os.path.join(utils.getHome(), ".vtrader-%s-%s-cookies.txt" % (self.username, m.hexdigest()))
