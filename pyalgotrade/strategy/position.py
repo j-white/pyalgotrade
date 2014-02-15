@@ -44,7 +44,7 @@ class Position(object):
         if not entryOrder.getAllOrNone():
             raise Exception("Only all-or-none orders are supported with the position interface")
 
-        self.__activeOrders = {entryOrder.getId(): entryOrder}
+        self.__activeOrders = {}
         self.__shares = 0
         self.__strategy = strategy
         self.__entryOrder = entryOrder
@@ -54,6 +54,9 @@ class Position(object):
         entryOrder.setGoodTillCanceled(goodTillCanceled)
         # This may raise an exception, so we wan't to place the order before moving forward and registering the order in the strategy.
         strategy.getBroker().placeOrder(entryOrder)
+
+        # The broker.placeOrder call may update order's id, so we postpone adding to the map until this is called
+        self.__activeOrders[entryOrder.getId()] = entryOrder
 
         self.getStrategy().registerPositionOrder(self, entryOrder)
 
