@@ -3,3 +3,4 @@ scipy>=0.12.1
 pytz>=2012d
 twisted>=13.2.0
 jinja2>=2.7.2
+matplotlib>=1.2.0

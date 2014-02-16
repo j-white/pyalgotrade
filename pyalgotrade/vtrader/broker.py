@@ -22,6 +22,7 @@ from pyalgotrade import observer
 from pyalgotrade import broker
 from pyalgotrade.broker import backtesting
 from client import VtraderClient
+from datetime import datetime
 
 class VtraderOrder(object):
     def setId(self, orderId):
@@ -88,6 +89,18 @@ class VtraderBroker(broker.Broker, observer.Subject):
     def getPositions(self):
         """Returns a dictionary that maps instruments to shares."""
         return self.__client.getPositions()
+
+    def getStrategyPositions(self):
+        for instrument, shares in self.getPositions().iteritems():
+            action = broker.Order.Action.BUY if shares > 0 else broker.Order.Action.SELL
+            order = broker.createMarketOrder(action, instrument, abs(shares))
+
+            quantity = abs(shares)
+            price = 5
+            commission = self.getCommission().calculate(order, price, quantity)
+            orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, commission, datetime.now())
+
+            order.addExecutionInfo(orderExecutionInfo)
 
     def placeOrder(self, order):
         if order.isInitial():

@@ -45,14 +45,19 @@ def getConfig():
     url: <VTRADER-URL-HERE>
     """
 
+    config_file = os.path.join(getHome(), 'vtrader.cfg')
+    if not os.path.exists(config_file):
+        msg = "Configuration file '%s' does not exist. See doc for details." % config_file
+        logger.error(msg)
+        raise Exception(msg)
+
     config = ConfigParser.ConfigParser()
-    config.read(os.path.join(getHome(), 'vtrader.cfg'))
+    config.read(config_file)
     return dict(config.items('vtrader'))
 
-def getFeed(instruments, suffix='', start_date=datetime(2009, 01, 01)):
+def getFeed(instruments, suffix='', start_date=datetime.today() - timedelta(days=365)):
     frequency = bar.Frequency.DAY
-    home = os.path.join(os.path.expanduser("~"), ".pyalgotrade")
-    dbFile = os.path.join(home, 'bars.sqlite')
+    dbFile = os.path.join(getHome(), 'bars.sqlite')
     db_feed = sqlitefeed.Feed(dbFile, frequency)
     db = sqlitefeed.Database(dbFile)
 
@@ -70,15 +75,17 @@ def getFeed(instruments, suffix='', start_date=datetime(2009, 01, 01)):
             csv = yahoofinance.download_csv(instrument + suffix, begin, end, frequency)
             logger.info("Download complete. Persisting bars to database.")
 
-            tmpfile = tempfile.NamedTemporaryFile(delete=True)
+            tmpfile = tempfile.NamedTemporaryFile(delete=False)
             tmpfile.write(csv)
             tmpfile.flush()
+            tmpfile.close()
 
             yahoo_feed = yahoofeed.Feed()
             yahoo_feed.addBarsFromCSV(instrument, tmpfile.name)
             db.addBarsFromFeed(yahoo_feed)
 
-            tmpfile.close()
+            os.remove(tmpfile.name)
+
             logger.info("Done persisting bars to database.")
 
         db_feed.loadBars(instrument, fromDateTime=start_date)

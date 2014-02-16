@@ -35,6 +35,3 @@ class VtraderStrategy(BaseStrategy):
             raise Exception("The barfeed doesn't support adjusted close values")
         self.getBroker().setUseAdjustedValues(useAdjusted, True)
         self.__useAdjustedValues = useAdjusted
-
-    def onBars(self, bars):
-        self.__broker.updateActiveOrders()
