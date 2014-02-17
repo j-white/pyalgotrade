@@ -21,8 +21,8 @@
 from pyalgotrade import observer
 from pyalgotrade import broker
 from pyalgotrade.broker import backtesting
+from pyalgotrade.strategy.position import LongPosition, ShortPosition
 from client import VtraderClient
-from datetime import datetime
 
 class VtraderOrder(object):
     def setId(self, orderId):
@@ -90,17 +90,26 @@ class VtraderBroker(broker.Broker, observer.Subject):
         """Returns a dictionary that maps instruments to shares."""
         return self.__client.getPositions()
 
-    def getStrategyPositions(self):
-        for instrument, shares in self.getPositions().iteritems():
-            action = broker.Order.Action.BUY if shares > 0 else broker.Order.Action.SELL
-            order = broker.createMarketOrder(action, instrument, abs(shares))
+    def getStrategyPositions(self, strategy):
+        positions = {}
+        positions['BB'] = LongPosition(strategy, 'BB', 0, 0, 1, True)
+        return positions
 
-            quantity = abs(shares)
-            price = 5
-            commission = self.getCommission().calculate(order, price, quantity)
-            orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, commission, datetime.now())
-
-            order.addExecutionInfo(orderExecutionInfo)
+        # positions = {}
+        # for instrument, shares in self.getPositions().iteritems():
+        #     action = broker.Order.Action.BUY if shares > 0 else broker.Order.Action.SELL
+        #     order = self.createMarketOrder(action, instrument, abs(shares))
+        #
+        #     quantity = abs(shares)
+        #     price = 5
+        #     commission = 0
+        #     if self.__commission is not None:
+        #         commission = self.__commission.calculate(order, price, quantity)
+        #     order.setState(broker.Order.State.ACCEPTED)
+        #     orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, commission, datetime.now())
+        #
+        #     order.addExecutionInfo(orderExecutionInfo)
+        #     positions[instrument] = Positions
 
     def placeOrder(self, order):
         if order.isInitial():

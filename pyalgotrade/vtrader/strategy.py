@@ -23,7 +23,10 @@ from broker import VtraderBroker
 
 class VtraderStrategy(BaseStrategy):
     def __init__(self, barFeed, *args, **kwargs):
-        self.__broker = VtraderBroker(*args, **kwargs)
+        if len(args) >= 1 and isinstance(args[0], VtraderBroker):
+            self.__broker = args[0]
+        else:
+            self.__broker = VtraderBroker(*args, **kwargs)
         self.__useAdjustedValues = False
         super(VtraderStrategy, self).__init__(barFeed, self.__broker)
 
