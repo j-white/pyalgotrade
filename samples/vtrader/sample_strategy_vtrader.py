@@ -8,7 +8,7 @@ class VtraderMyStrategy(MyStrategy, VtraderStrategy):
         VtraderStrategy.__init__(self, feed, **utils.getConfig())
 
     def onStart(self):
-        self.setPositions(self.getBroker().getStrategyPositions())
+        self.setPositions(self.getBroker().getStrategyPositions(self))
 
     def onBars(self, bars):
         # Playback the data until yesterday to populate the SMA filters
