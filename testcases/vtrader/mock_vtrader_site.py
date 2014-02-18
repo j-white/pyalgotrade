@@ -111,6 +111,10 @@ class PortfolioPositions(JSONResource):
                                 "Quantity": {
                                     "RawData": {{ quantity }},
                                     "FormattedData": "{{ quantity }}"
+                                },
+                                "AvgCostValue": {
+                                    "RawData": {{ quantity }},
+                                    "FormattedData": "{{ quantity }}"
                                 }
                             }
                         {% endfor %}

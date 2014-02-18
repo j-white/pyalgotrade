@@ -11,11 +11,12 @@ def tearDownModule():
 
 class StrategyTestCase(VtraderBrokerTestCase, unittest.TestCase):
     def testGetStrategyPositions(self):
-        barFeed = self.buildBarFeed(backtesting_test.BaseTestCase.TestInstrument, bar.Frequency.MINUTE)
+        instrument = backtesting_test.BaseTestCase.TestInstrument
+        barFeed = self.buildBarFeed(instrument, bar.Frequency.MINUTE)
         brk = self.buildBroker(11, barFeed)
 
         # Buy
-        order = brk.createMarketOrder(broker.Order.Action.BUY, backtesting_test.BaseTestCase.TestInstrument, 1)
+        order = brk.createMarketOrder(broker.Order.Action.BUY, instrument, 1)
         brk.placeOrder(order)
         self.assertEqual(order.getFilled(), 0)
         self.assertEqual(order.getRemaining(), 1)
@@ -24,12 +25,13 @@ class StrategyTestCase(VtraderBrokerTestCase, unittest.TestCase):
         self.assertEqual(order.getAvgFillPrice(), 10)
         self.assertTrue(len(brk.getActiveOrders()) == 0)
         self.assertTrue(brk.getCash() == 1)
-        self.assertTrue(brk.getShares(backtesting_test.BaseTestCase.TestInstrument) == 1)
+        self.assertTrue(brk.getShares(instrument) == 1)
 
         strategy = VtraderStrategy(barFeed, brk)
         positions = brk.getStrategyPositions(strategy)
         self.assertEquals(1, len(positions))
+        self.assertTrue(positions[instrument].entryFilled())
 
         self.assertTrue(len(brk.getActiveOrders()) == 0)
         self.assertTrue(brk.getCash() == 1)
-        self.assertTrue(brk.getShares(backtesting_test.BaseTestCase.TestInstrument) == 1)
+        self.assertTrue(brk.getShares(instrument) == 1)

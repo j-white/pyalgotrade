@@ -21,15 +21,7 @@
 from pyalgotrade import observer
 from pyalgotrade import broker
 from pyalgotrade.broker import backtesting
-from pyalgotrade.strategy.position import LongPosition, ShortPosition
 from client import VtraderClient
-
-class VtraderOrder(object):
-    def setId(self, orderId):
-        self.__id = orderId
-
-    def getId(self):
-        return self.__id
 
 class MarketOrder(broker.MarketOrder):
     def __init__(self, orderId, *args, **kwargs):
@@ -42,14 +34,38 @@ class MarketOrder(broker.MarketOrder):
     def getId(self):
         return self.__id
 
-class LimitOrder(VtraderOrder, broker.LimitOrder):
-    pass
+class LimitOrder(broker.LimitOrder):
+    def __init__(self, orderId, *args, **kwargs):
+        super(LimitOrder, self).__init__(orderId, *args, **kwargs)
+        self.__id = orderId
 
-class StopOrder(VtraderOrder, broker.StopOrder):
-    pass
+    def setId(self, orderId):
+        self.__id = orderId
 
-class StopLimitOrder(VtraderOrder, broker.StopLimitOrder):
-    pass
+    def getId(self):
+        return self.__id
+
+class StopOrder(broker.StopOrder):
+    def __init__(self, orderId, *args, **kwargs):
+        super(StopOrder, self).__init__(orderId, *args, **kwargs)
+        self.__id = orderId
+
+    def setId(self, orderId):
+        self.__id = orderId
+
+    def getId(self):
+        return self.__id
+
+class StopLimitOrder(broker.StopLimitOrder):
+    def __init__(self, orderId, *args, **kwargs):
+        super(StopLimitOrder, self).__init__(orderId, *args, **kwargs)
+        self.__id = orderId
+
+    def setId(self, orderId):
+        self.__id = orderId
+
+    def getId(self):
+        return self.__id
 
 class VtraderBroker(broker.Broker, observer.Subject):
     """A Vtrader broker."""
@@ -60,6 +76,7 @@ class VtraderBroker(broker.Broker, observer.Subject):
         self.__activeOrders = {}
         self.__client = VtraderClient(*args, **kwargs)
         self.__commission = backtesting.FixedPerTrade(self.COMMISSION_PER_TRADE)
+        self.__playback_mode = False
 
     def getClient(self):
         return self.__client
@@ -91,30 +108,18 @@ class VtraderBroker(broker.Broker, observer.Subject):
         return self.__client.getPositions()
 
     def getStrategyPositions(self, strategy):
-        positions = {}
-        positions['BB'] = LongPosition(strategy, 'BB', 0, 0, 1, True)
-        return positions
-
-        # positions = {}
-        # for instrument, shares in self.getPositions().iteritems():
-        #     action = broker.Order.Action.BUY if shares > 0 else broker.Order.Action.SELL
-        #     order = self.createMarketOrder(action, instrument, abs(shares))
-        #
-        #     quantity = abs(shares)
-        #     price = 5
-        #     commission = 0
-        #     if self.__commission is not None:
-        #         commission = self.__commission.calculate(order, price, quantity)
-        #     order.setState(broker.Order.State.ACCEPTED)
-        #     orderExecutionInfo = broker.OrderExecutionInfo(price, quantity, commission, datetime.now())
-        #
-        #     order.addExecutionInfo(orderExecutionInfo)
-        #     positions[instrument] = Positions
+        try:
+            self.__playback_mode = True
+            return self.__client.getStrategyPositions(strategy, self.getCommission())
+        finally:
+            self.__playback_mode = False
 
     def placeOrder(self, order):
         if order.isInitial():
             # Place the order and set the order's id
             self.__client.placeOrder(order)
+            if self.__playback_mode:
+                return
             self.__activeOrders[order.getId()] = order
 
             # Switch from INITIAL -> SUBMITTED

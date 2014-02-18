@@ -29,6 +29,7 @@ import re
 import time
 from datetime import datetime
 
+from pyalgotrade.strategy.position import LongPosition, ShortPosition
 from pyalgotrade import broker
 import pyalgotrade.logger
 import utils
@@ -242,6 +243,9 @@ class VtraderClient(object):
         self.save_cookies_to_disk = save_cookies_to_disk
         self.cookie_file = self._getCookieFile()
 
+        # Use by getStrategyPositions()
+        self.__playback_mode = False
+
         # Fire up the cookie jar
         self.cj = cookielib.MozillaCookieJar(self.cookie_file)
         try:
@@ -333,6 +337,31 @@ class VtraderClient(object):
             positions[position['Symbol']] = int(position['Quantity']['RawData'])
         return positions
 
+    def getStrategyPositions(self, strategy, commission):
+        positions = {}
+        try:
+            self.__playback_mode = True
+
+            position_rows = self._getPortfolioPositions()['data']
+            for position in position_rows:
+                instrument = position['Symbol']
+                quantity = int(position['Quantity']['RawData'])
+                average_price = float(position['AvgCostValue']['RawData'])
+                if quantity > 0:
+                    positions[instrument] = LongPosition(strategy, instrument, 0, 0, abs(quantity), True)
+                elif quantity < 0:
+                    positions[instrument] = ShortPosition(strategy, instrument, 0, 0, abs(quantity), True)
+
+                order = positions[instrument].getEntryOrder()
+                commission_fees = 0
+                if commission is not None:
+                    commission_fees = commission.calculate(order, average_price, abs(quantity))
+                execution_info = broker.OrderExecutionInfo(average_price, abs(quantity), commission_fees, datetime.now())
+                order.addExecutionInfo(execution_info)
+        finally:
+            self.__playback_mode = False
+        return positions
+
     def getEstimatedAccountValue(self):
         account_balance = self._getAccountBalance()
         return float(account_balance['AccountValue']['RawData'])
@@ -412,6 +441,11 @@ class VtraderClient(object):
 
            @throws OrderFailed
         """
+
+        if self.__playback_mode:
+            order.switchState(broker.Order.State.SUBMITTED)
+            order.switchState(broker.Order.State.ACCEPTED)
+            return
 
         # Determine the limit and stop prices if applicable
         limit_price = ''
