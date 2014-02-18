@@ -9,8 +9,8 @@ from twisted.internet import reactor
 def tearDownModule():
     reactor.callFromThread(reactor.stop)
 
-class StrategyTestCase(VtraderBrokerTestCase, unittest.TestCase):
-    def testGetStrategyPositions(self):
+class StrategyPositions(VtraderBrokerTestCase, unittest.TestCase):
+    def testGetStrategyPositionsWithLong(self):
         instrument = backtesting_test.BaseTestCase.TestInstrument
         barFeed = self.buildBarFeed(instrument, bar.Frequency.MINUTE)
         brk = self.buildBroker(11, barFeed)
@@ -23,15 +23,43 @@ class StrategyTestCase(VtraderBrokerTestCase, unittest.TestCase):
         barFeed.dispatchBars(10, 15, 8, 12)
         self.assertTrue(order.isFilled())
         self.assertEqual(order.getAvgFillPrice(), 10)
-        self.assertTrue(len(brk.getActiveOrders()) == 0)
-        self.assertTrue(brk.getCash() == 1)
-        self.assertTrue(brk.getShares(instrument) == 1)
+        self.assertEqual(len(brk.getActiveOrders()), 0)
+        self.assertEqual(brk.getCash(), 1)
+        self.assertEqual(brk.getShares(instrument), 1)
 
         strategy = VtraderStrategy(barFeed, brk)
         positions = brk.getStrategyPositions(strategy)
-        self.assertEquals(1, len(positions))
+        self.assertTrue(instrument in positions)
         self.assertTrue(positions[instrument].entryFilled())
+        self.assertEqual(positions[instrument].getShares(), 1)
 
-        self.assertTrue(len(brk.getActiveOrders()) == 0)
-        self.assertTrue(brk.getCash() == 1)
-        self.assertTrue(brk.getShares(instrument) == 1)
+        self.assertEqual(len(brk.getActiveOrders()), 0)
+        self.assertEqual(brk.getCash(), 1)
+        self.assertEqual(brk.getShares(instrument), 1)
+
+    def testGetStrategyPositionsWithShort(self):
+        instrument = backtesting_test.BaseTestCase.TestInstrument
+        barFeed = self.buildBarFeed(instrument, bar.Frequency.MINUTE)
+        brk = self.buildBroker(11, barFeed)
+
+        # Short
+        order = brk.createMarketOrder(broker.Order.Action.SELL_SHORT, instrument, 1)
+        brk.placeOrder(order)
+        self.assertEqual(order.getFilled(), 0)
+        self.assertEqual(order.getRemaining(), 1)
+        barFeed.dispatchBars(10, 15, 8, 12)
+        self.assertTrue(order.isFilled())
+        self.assertEqual(order.getAvgFillPrice(), 10)
+        self.assertEqual(len(brk.getActiveOrders()), 0)
+        self.assertEqual(brk.getCash(), 21)
+        self.assertEqual(brk.getShares(instrument), -1)
+
+        strategy = VtraderStrategy(barFeed, brk)
+        positions = brk.getStrategyPositions(strategy)
+        self.assertTrue(instrument in positions)
+        self.assertTrue(positions[instrument].entryFilled())
+        self.assertEqual(positions[instrument].getShares(), -1)
+
+        self.assertEqual(len(brk.getActiveOrders()), 0)
+        self.assertEqual(brk.getCash(), 21)
+        self.assertEqual(brk.getShares(instrument), -1)

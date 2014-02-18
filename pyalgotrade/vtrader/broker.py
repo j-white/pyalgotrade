@@ -110,7 +110,12 @@ class VtraderBroker(broker.Broker, observer.Subject):
     def getStrategyPositions(self, strategy):
         try:
             self.__playback_mode = True
-            return self.__client.getStrategyPositions(strategy, self.getCommission())
+            positions = self.__client.getStrategyPositions(strategy, self.getCommission())
+            for instrument in positions.keys():
+                order = positions[instrument].getEntryOrder()
+                assert(order.isFilled())
+                self.notifyOrderEvent(broker.OrderEvent(order, broker.OrderEvent.Type.FILLED, order.getExecutionInfo()))
+            return positions
         finally:
             self.__playback_mode = False
 
